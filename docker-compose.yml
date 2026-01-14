@@ -1,0 +1,156 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: dam-postgres
+    environment:
+      POSTGRES_DB: dam_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ayan
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dam_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dam-network
+
+  # Redis for BullMQ
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: dam-redis
+    command: redis-server --appendonly yes --requirepass redispassword
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dam-network
+
+  # MinIO Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: dam-assets
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - dam-network
+
+  # API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dam-api
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:ayan@postgres:5432/dam_platform
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: dam_platform
+      DB_USER: postgres
+      DB_PASSWORD: ayan
+      REDIS_HOST: redis
+      REDIS_PASSWORD: redispassword
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_BUCKET: dam-assets
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - dam-network
+    restart: unless-stopped
+
+  # Worker Service
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: dam-worker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:ayan@postgres:5432/dam_platform
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: dam_platform
+      DB_USER: postgres
+      DB_PASSWORD: ayan
+      REDIS_HOST: redis
+      REDIS_PASSWORD: redispassword
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_BUCKET: dam-assets
+      WORKER_CONCURRENCY: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - dam-network
+    restart: unless-stopped
+
+  # BullMQ Dashboard (Optional - for monitoring)
+  bull-board:
+    image: deadly0/bull-board:latest
+    container_name: dam-bull-board
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redispassword
+      BULL_PREFIX: bull
+    ports:
+      - "3002:3000"
+    depends_on:
+      - redis
+    networks:
+      - dam-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  dam-network:
+    driver: bridge

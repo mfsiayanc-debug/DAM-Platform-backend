@@ -1,0 +1,20 @@
+# Base image with Node.js
+FROM node:18-alpine
+
+# Install FFmpeg for video processing
+RUN apk add --no-cache ffmpeg
+
+# Create app directory
+WORKDIR /usr/src/app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy application code
+COPY . .
+
+# Start worker
+CMD ["npm", "run", "worker"]
