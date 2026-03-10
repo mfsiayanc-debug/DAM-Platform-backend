@@ -5,7 +5,6 @@ const morgan = require('morgan');
 const config = require('./config');
 const routes = require('./routes');
 const { initializeMinIO } = require('./services/storage');
-const { initializeDatabase } = require('./db');
 
 const app = express();
 
@@ -42,10 +41,6 @@ app.use((err, req, res, next) => {
 // Initialize services and start server
 async function startServer() {
   try {
-    // Initialize database
-    await initializeDatabase();
-    console.log('✓ Database initialized');
-
     // Initialize MinIO
     await initializeMinIO();
     console.log('✓ MinIO storage initialized');
