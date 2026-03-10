@@ -4,9 +4,10 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs').promises;
 const os = require('os');
+const { pipeline } = require('stream/promises');
 const config = require('./config');
 const { connection } = require('./services/queue');
-const { uploadToMinIO } = require('./services/storage');
+const { uploadToMinIO, downloadFromMinIO } = require('./services/storage');
 const db = require('./db');
 
 console.log('Starting Asset Processing Worker...');
@@ -38,22 +39,30 @@ const worker = new Worker(
 
 // Process asset (thumbnails, metadata, video transcoding)
 async function processAsset(data) {
-  const { assetId, fileName, thumbnailName, assetType, mimeType, originalBuffer } = data;
+  const { assetId, fileName, thumbnailName, assetType, mimeType } = data;
   
   console.log(`Processing asset ${assetId} (${assetType})`);
 
   try {
-    // Convert base64 buffer back to Buffer
-    const buffer = Buffer.from(originalBuffer, 'base64');
-    
     let metadata = {};
 
-    if (assetType === 'image') {
-      metadata = await processImage(buffer, thumbnailName);
-    } else if (assetType === 'video') {
-      metadata = await processVideo(buffer, fileName, thumbnailName);
-    } else {
-      metadata = await processDocument(buffer);
+    // Fetch original from MinIO without putting it in the queue payload.
+    // Download to a temp file so we don't need to hold large originals in RAM.
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-asset-'));
+    const inputPath = path.join(tempDir, fileName);
+
+    try {
+      await downloadMinIOToFile(fileName, inputPath);
+
+      if (assetType === 'image') {
+        metadata = await processImageFromFile(inputPath, thumbnailName);
+      } else if (assetType === 'video') {
+        metadata = await processVideoFromFile(inputPath, thumbnailName);
+      } else {
+        metadata = await processDocumentFromFile(inputPath, mimeType, thumbnailName);
+      }
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
     }
 
     // Update asset in database
@@ -80,11 +89,16 @@ async function processAsset(data) {
   }
 }
 
+async function downloadMinIOToFile(objectName, destPath) {
+  const stream = await downloadFromMinIO(objectName);
+  await pipeline(stream, require('fs').createWriteStream(destPath));
+}
+
 // Process image: generate thumbnail and extract metadata
-async function processImage(buffer, thumbnailName) {
+async function processImageFromFile(inputPath, thumbnailName) {
   console.log('Processing image...');
   
-  const image = sharp(buffer);
+  const image = sharp(inputPath);
   const metadata = await image.metadata();
 
   // Generate thumbnail
@@ -110,17 +124,13 @@ async function processImage(buffer, thumbnailName) {
 }
 
 // Process video: extract thumbnail, metadata, and transcode
-async function processVideo(buffer, fileName, thumbnailName) {
+async function processVideoFromFile(inputPath, thumbnailName) {
   console.log('Processing video...');
   
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-video-'));
-  const inputPath = path.join(tempDir, 'input.mp4');
   const thumbnailPath = path.join(tempDir, 'thumbnail.jpg');
 
   try {
-    // Write buffer to temp file
-    await fs.writeFile(inputPath, buffer);
-
     // Extract metadata
     const metadata = await getVideoMetadata(inputPath);
 
@@ -230,7 +240,7 @@ function transcodeToResolution(inputPath, outputPath, height) {
 }
 
 // Process document: extract metadata and generate thumbnail
-async function processDocument(buffer, mimeType, thumbnailName) {
+async function processDocumentFromFile(inputPath, mimeType, thumbnailName) {
   console.log('Processing document...');
   console.log(`Thumbnail will be saved as: ${thumbnailName}`);
   
@@ -239,18 +249,13 @@ async function processDocument(buffer, mimeType, thumbnailName) {
   try {
     let thumbnailBuffer;
     let metadata = {
-      size: buffer.length,
       mimeType,
     };
 
     // Handle PDF documents
     if (mimeType === 'application/pdf') {
-      const inputPath = path.join(tempDir, 'input.pdf');
       const outputPrefix = path.join(tempDir, 'page');
       
-      // Write PDF to temp file
-      await fs.writeFile(inputPath, buffer);
-
       try {
         // Convert first page of PDF to PNG
         const opts = {
@@ -296,12 +301,73 @@ async function processDocument(buffer, mimeType, thumbnailName) {
     await uploadToMinIO(thumbnailName, thumbnailBuffer, 'image/jpeg');
     console.log(`Document thumbnail uploaded successfully: ${thumbnailName}`);
 
+    try {
+      const stat = await fs.stat(inputPath);
+      metadata.size = stat.size;
+    } catch {
+      // Best-effort size; avoid failing processing for a missing stat
+    }
+
     return metadata;
   } finally {
     // Cleanup temp files
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 }
+
+function getDocumentTypeLabel(mimeType) {
+  if (!mimeType) return 'FILE';
+
+  const map = {
+    'application/pdf': 'PDF',
+    'application/msword': 'DOC',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
+    'application/vnd.ms-excel': 'XLS',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
+    'application/vnd.ms-powerpoint': 'PPT',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PPTX',
+    'text/plain': 'TXT',
+    'text/csv': 'CSV',
+    'application/json': 'JSON',
+    'application/xml': 'XML',
+  };
+
+  return map[mimeType] || mimeType.split('/')[1]?.toUpperCase() || 'FILE';
+}
+
+async function createPlaceholderThumbnail(label, mimeType) {
+  const width = config.processing.thumbnail.width;
+  const height = Math.round(width * 1.3);
+
+  const svg = `
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100%" height="100%" fill="#2c2c2c"/>
+      <rect x="10%" y="20%" width="80%" height="60%" rx="12" fill="#444"/>
+      <text x="50%" y="50%" 
+            dominant-baseline="middle" 
+            text-anchor="middle" 
+            font-size="48" 
+            font-family="Arial, Helvetica, sans-serif"
+            fill="#ffffff"
+            font-weight="bold">
+        ${label}
+      </text>
+      <text x="50%" y="70%" 
+            dominant-baseline="middle" 
+            text-anchor="middle" 
+            font-size="16"
+            font-family="Arial, Helvetica, sans-serif"
+            fill="#cccccc">
+        ${mimeType || ''}
+      </text>
+    </svg>
+  `;
+
+  return sharp(Buffer.from(svg))
+    .jpeg({ quality: config.processing.thumbnail.quality })
+    .toBuffer();
+}
+
 
 // Worker event handlers
 worker.on('completed', (job) => {

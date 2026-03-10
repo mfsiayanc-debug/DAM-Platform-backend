@@ -57,7 +57,6 @@ async function uploadAssets(req, res, next) {
         thumbnailName,
         assetType,
         mimeType: file.mimetype,
-        originalBuffer: file.buffer.toString('base64'), // For worker access
       });
 
       uploadedAssets.push({
