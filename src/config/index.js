@@ -52,4 +52,9 @@ module.exports = {
       audioCodec: process.env.VIDEO_AUDIO_CODEC || 'aac',
     },
   },
+
+  auth: {
+    jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h',
+  },
 };

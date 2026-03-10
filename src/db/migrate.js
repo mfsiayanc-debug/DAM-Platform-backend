@@ -53,6 +53,17 @@ async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_assets_tags ON assets USING GIN(tags);
     `);
 
+    // Users table for authentication
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     console.log('Database migrations completed successfully.');
   } catch (err) {
     console.error('Migration failed:', err);

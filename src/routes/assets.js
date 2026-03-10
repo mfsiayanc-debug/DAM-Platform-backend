@@ -1,6 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const config = require('../config');
+const { authenticate } = require('../middleware/auth');
 const {
   uploadAssets,
   getAssets,
@@ -43,12 +44,12 @@ const upload = multer({
 });
 
 // Routes
-router.post('/upload', upload.array('files', 10), uploadAssets);
+router.post('/upload', authenticate, upload.array('files', 10), uploadAssets);
 router.get('/', getAssets);
 router.get('/:id', getAssetById);
 router.get('/:id/thumbnail', getThumbnail);
 router.get('/:id/download', downloadAsset);
-router.delete('/:id', deleteAsset);
-router.patch('/:id/tags', updateAssetTags);
+router.delete('/:id', authenticate, deleteAsset);
+router.patch('/:id/tags', authenticate, updateAssetTags);
 
 module.exports = router;
