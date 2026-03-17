@@ -51,6 +51,10 @@ jest.mock('../src/db', () => ({
   query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
 }));
 
+jest.mock('../src/services/queue', () => ({
+  connection: {},
+}));
+
 jest.mock('fluent-ffmpeg', () => {
   const ffmpeg = jest.fn(() => {
     const handlers = {};
