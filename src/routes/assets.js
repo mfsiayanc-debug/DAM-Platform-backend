@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const config = require('../config');
 const { authenticate } = require('../middleware/auth');
+const { ALLOWED_MIME_TYPES } = require('../services/uploadPipeline');
 const {
   uploadAssets,
   getAssets,
@@ -21,21 +22,7 @@ const upload = multer({
     fileSize: config.upload.maxFileSize,
   },
   fileFilter: (req, file, cb) => {
-    // Accept images, videos, and documents
-    const allowedMimes = [
-      'image/jpeg',
-      'image/png',
-      'image/gif',
-      'image/webp',
-      'video/mp4',
-      'video/mpeg',
-      'video/quicktime',
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ];
-
-    if (allowedMimes.includes(file.mimetype)) {
+    if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error(`File type ${file.mimetype} not supported`));

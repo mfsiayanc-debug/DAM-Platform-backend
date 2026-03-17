@@ -1,6 +1,5 @@
-const { v4: uuidv4 } = require('uuid');
-const { uploadToMinIO, downloadFromMinIO, deleteFromMinIO } = require('../services/storage');
-const { addJob } = require('../services/queue');
+const { downloadFromMinIO, deleteFromMinIO } = require('../services/storage');
+const { createAssetFromUpload } = require('../services/uploadPipeline');
 const db = require('../db');
 
 // Upload multiple assets
@@ -13,58 +12,14 @@ async function uploadAssets(req, res, next) {
     const uploadedAssets = [];
 
     for (const file of req.files) {
-      const assetId = uuidv4();
-      const fileExtension = file.originalname.split('.').pop();
-      const fileName = `${assetId}.${fileExtension}`;
-      const thumbnailName = `${assetId}_thumb.jpg`;
-
-      // Upload original file to MinIO
-      await uploadToMinIO(fileName, file.buffer, file.mimetype);
-
-      // Determine asset type
-      let assetType = 'document';
-      if (file.mimetype.startsWith('image/')) assetType = 'image';
-      if (file.mimetype.startsWith('video/')) assetType = 'video';
-
-      // Generate basic tags from filename
-      const tags = generateTags(file.originalname, file.mimetype);
-
-      // Insert asset record into database
-      const result = await db.query(
-        `INSERT INTO assets 
-        (id, name, type, size, mime_type, file_path, thumbnail_path, tags, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING *`,
-        [
-          assetId,
-          file.originalname,
-          assetType,
-          file.size,
-          file.mimetype,
-          fileName,
-          thumbnailName,
-          JSON.stringify(tags),
-          'processing',
-        ],
-      );
-
-      const asset = result.rows[0];
-
-      // Add processing job to queue
-      await addJob('process-asset', {
-        assetId,
-        fileName,
-        thumbnailName,
-        assetType,
+      const asset = await createAssetFromUpload({
+        originalName: file.originalname,
         mimeType: file.mimetype,
+        size: file.size,
+        buffer: file.buffer,
       });
 
-      uploadedAssets.push({
-        id: asset.id,
-        name: asset.name,
-        type: asset.type,
-        status: asset.status,
-      });
+      uploadedAssets.push(asset);
     }
 
     res.status(201).json({
@@ -297,27 +252,6 @@ async function updateAssetTags(req, res, next) {
   } catch (error) {
     next(error);
   }
-}
-
-// Helper: Generate tags from filename and mime type
-function generateTags(filename, mimeType) {
-  const tags = [];
-
-  // Add type tag
-  if (mimeType.startsWith('image/')) tags.push('image');
-  if (mimeType.startsWith('video/')) tags.push('video');
-  if (mimeType.startsWith('application/')) tags.push('document');
-
-  // Extract tags from filename
-  const nameParts = filename
-    .toLowerCase()
-    .replace(/\.[^/.]+$/, '') // Remove extension
-    .split(/[-_\s]+/)
-    .filter((part) => part.length > 2);
-
-  tags.push(...nameParts.slice(0, 5));
-
-  return [...new Set(tags)];
 }
 
 // Helper: Format asset for API response

@@ -5,8 +5,11 @@ const morgan = require('morgan');
 const config = require('./config');
 const routes = require('./routes');
 const { initializeMinIO } = require('./services/storage');
+const { resumableUploadPath, tusServer } = require('./services/tusServer');
 
 const app = express();
+const resumableUploadApp = express();
+resumableUploadApp.all('*', tusServer.handle.bind(tusServer));
 
 // Middleware
 app.use(helmet());
@@ -17,6 +20,7 @@ app.use(
   }),
 );
 app.use(morgan('combined'));
+app.use(resumableUploadPath, resumableUploadApp);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -29,7 +33,7 @@ app.get('/health', (req, res) => {
 app.use('/api', routes);
 
 // Error handling middleware
-app.use((err, req, res, next) => {
+app.use((err, req, res) => {
   console.error('Error:', err);
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.status(err.status || 500).json({

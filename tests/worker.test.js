@@ -1,5 +1,3 @@
-const path = require('path');
-
 jest.mock('../src/services/storage', () => ({
   uploadToMinIO: jest.fn().mockResolvedValue(undefined),
   downloadFromMinIO: jest.fn().mockResolvedValue({}),
@@ -30,12 +28,14 @@ jest.mock('fs', () => {
     mkdtemp: jest.fn().mockResolvedValue('/tmp/dam-test'),
     rm: jest.fn().mockResolvedValue(undefined),
     readFile: jest.fn().mockResolvedValue(Buffer.from('file')),
-    stat: jest.fn().mockRejectedValue(new Error('no file')),
+    stat: jest.fn().mockResolvedValue({ size: 2048 }),
+    unlink: jest.fn().mockResolvedValue(undefined),
   };
 
   return {
     promises,
     createWriteStream: jest.fn(() => ({})),
+    createReadStream: jest.fn(() => ({})),
   };
 });
 
@@ -52,22 +52,41 @@ jest.mock('../src/db', () => ({
 }));
 
 jest.mock('fluent-ffmpeg', () => {
-  const ffmpeg = jest.fn(() => ({
-    screenshots: jest.fn().mockReturnThis(),
-    on: jest.fn().mockReturnThis(),
-    videoCodec: jest.fn().mockReturnThis(),
-    audioCodec: jest.fn().mockReturnThis(),
-    size: jest.fn().mockReturnThis(),
-    outputOptions: jest.fn().mockReturnThis(),
-    output: jest.fn().mockReturnThis(),
-    run: jest.fn(),
-  }));
+  const ffmpeg = jest.fn(() => {
+    const handlers = {};
+    const command = {
+      screenshots: jest.fn(() => {
+        setImmediate(() => handlers.end?.());
+        return command;
+      }),
+      on: jest.fn((event, handler) => {
+        handlers[event] = handler;
+        return command;
+      }),
+      videoCodec: jest.fn(() => command),
+      audioCodec: jest.fn(() => command),
+      size: jest.fn(() => command),
+      outputOptions: jest.fn(() => command),
+      output: jest.fn(() => command),
+      run: jest.fn(() => {
+        setImmediate(() => handlers.end?.());
+      }),
+    };
+
+    return command;
+  });
 
   ffmpeg.ffprobe = (inputPath, cb) => {
     cb(null, {
       format: { duration: 10, bit_rate: 1000 },
       streams: [
-        { codec_type: 'video', width: 1280, height: 720, codec_name: 'h264', r_frame_rate: '30/1' },
+        {
+          codec_type: 'video',
+          width: 1920,
+          height: 1080,
+          codec_name: 'h264',
+          r_frame_rate: '30/1',
+        },
       ],
     });
   };
@@ -124,12 +143,18 @@ describe('worker processing logic', () => {
   });
 
   test('processVideoFromFile extracts metadata and thumbnail', async () => {
-    await processVideoFromFile('/tmp/video.mp4', 'video-thumb.jpg');
+    const result = await processVideoFromFile('/tmp/video.mp4', 'video.mp4', 'video-thumb.jpg');
 
     expect(storage.uploadToMinIO).toHaveBeenCalledWith(
       'video-thumb.jpg',
       expect.any(Buffer),
       'image/jpeg',
+    );
+    expect(result.renditions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ height: 1080, fileName: 'video_1080p.mp4' }),
+        expect.objectContaining({ height: 720, fileName: 'video_720p.mp4' }),
+      ]),
     );
   });
 

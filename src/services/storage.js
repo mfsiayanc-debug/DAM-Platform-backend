@@ -41,9 +41,11 @@ async function initializeMinIO() {
 }
 
 // Upload file to MinIO
-async function uploadToMinIO(fileName, buffer, contentType) {
+async function uploadToMinIO(fileName, data, contentType, size) {
   try {
-    await minioClient.putObject(config.minio.bucket, fileName, buffer, buffer.length, {
+    const uploadSize = Buffer.isBuffer(data) ? data.length : size;
+
+    await minioClient.putObject(config.minio.bucket, fileName, data, uploadSize, {
       'Content-Type': contentType,
     });
     return fileName;
