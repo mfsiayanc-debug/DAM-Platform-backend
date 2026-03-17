@@ -1,6 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const config = require('../config');
+const { authenticate } = require('../middleware/auth');
+const { ALLOWED_MIME_TYPES } = require('../services/uploadPipeline');
 const {
   uploadAssets,
   getAssets,
@@ -8,7 +10,7 @@ const {
   downloadAsset,
   deleteAsset,
   updateAssetTags,
-  getThumbnail
+  getThumbnail,
 } = require('../controllers/assetController');
 
 const router = express.Router();
@@ -20,21 +22,7 @@ const upload = multer({
     fileSize: config.upload.maxFileSize,
   },
   fileFilter: (req, file, cb) => {
-    // Accept images, videos, and documents
-    const allowedMimes = [
-      'image/jpeg',
-      'image/png',
-      'image/gif',
-      'image/webp',
-      'video/mp4',
-      'video/mpeg',
-      'video/quicktime',
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ];
-    
-    if (allowedMimes.includes(file.mimetype)) {
+    if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error(`File type ${file.mimetype} not supported`));
@@ -43,12 +31,12 @@ const upload = multer({
 });
 
 // Routes
-router.post('/upload', upload.array('files', 10), uploadAssets);
+router.post('/upload', authenticate, upload.array('files', 10), uploadAssets);
 router.get('/', getAssets);
 router.get('/:id', getAssetById);
 router.get('/:id/thumbnail', getThumbnail);
 router.get('/:id/download', downloadAsset);
-router.delete('/:id', deleteAsset);
-router.patch('/:id/tags', updateAssetTags);
+router.delete('/:id', authenticate, deleteAsset);
+router.patch('/:id/tags', authenticate, updateAssetTags);
 
 module.exports = router;

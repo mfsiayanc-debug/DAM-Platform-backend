@@ -5,17 +5,22 @@ const morgan = require('morgan');
 const config = require('./config');
 const routes = require('./routes');
 const { initializeMinIO } = require('./services/storage');
-const { initializeDatabase } = require('./db');
+const { resumableUploadPath, tusServer } = require('./services/tusServer');
 
 const app = express();
+const resumableUploadApp = express();
+resumableUploadApp.all('*', tusServer.handle.bind(tusServer));
 
 // Middleware
 app.use(helmet());
-app.use(cors({
-  origin: config.server.frontendUrl,
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: config.server.frontendUrl,
+    credentials: true,
+  }),
+);
 app.use(morgan('combined'));
+app.use(resumableUploadPath, resumableUploadApp);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -28,9 +33,9 @@ app.get('/health', (req, res) => {
 app.use('/api', routes);
 
 // Error handling middleware
-app.use((err, req, res, next) => {
+app.use((err, req, res) => {
   console.error('Error:', err);
-  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.status(err.status || 500).json({
     error: {
       message: err.message || 'Internal Server Error',
@@ -42,10 +47,6 @@ app.use((err, req, res, next) => {
 // Initialize services and start server
 async function startServer() {
   try {
-    // Initialize database
-    await initializeDatabase();
-    console.log('✓ Database initialized');
-
     // Initialize MinIO
     await initializeMinIO();
     console.log('✓ MinIO storage initialized');

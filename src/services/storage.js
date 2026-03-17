@@ -14,11 +14,11 @@ const minioClient = new Minio.Client({
 async function initializeMinIO() {
   try {
     const bucketExists = await minioClient.bucketExists(config.minio.bucket);
-    
+
     if (!bucketExists) {
       await minioClient.makeBucket(config.minio.bucket, 'us-east-1');
       console.log(`Bucket "${config.minio.bucket}" created successfully`);
-      
+
       // Set bucket policy to allow public read access for thumbnails
       const policy = {
         Version: '2012-10-17',
@@ -31,11 +31,8 @@ async function initializeMinIO() {
           },
         ],
       };
-      
-      await minioClient.setBucketPolicy(
-        config.minio.bucket,
-        JSON.stringify(policy)
-      );
+
+      await minioClient.setBucketPolicy(config.minio.bucket, JSON.stringify(policy));
     }
   } catch (error) {
     console.error('MinIO initialization error:', error);
@@ -44,17 +41,13 @@ async function initializeMinIO() {
 }
 
 // Upload file to MinIO
-async function uploadToMinIO(fileName, buffer, contentType) {
+async function uploadToMinIO(fileName, data, contentType, size) {
   try {
-    await minioClient.putObject(
-      config.minio.bucket,
-      fileName,
-      buffer,
-      buffer.length,
-      {
-        'Content-Type': contentType,
-      }
-    );
+    const uploadSize = Buffer.isBuffer(data) ? data.length : size;
+
+    await minioClient.putObject(config.minio.bucket, fileName, data, uploadSize, {
+      'Content-Type': contentType,
+    });
     return fileName;
   } catch (error) {
     console.error('MinIO upload error:', error);
@@ -85,11 +78,7 @@ async function deleteFromMinIO(fileName) {
 // Get presigned URL for file
 async function getPresignedUrl(fileName, expirySeconds = 3600) {
   try {
-    return await minioClient.presignedGetObject(
-      config.minio.bucket,
-      fileName,
-      expirySeconds
-    );
+    return await minioClient.presignedGetObject(config.minio.bucket, fileName, expirySeconds);
   } catch (error) {
     console.error('MinIO presigned URL error:', error);
     throw error;
