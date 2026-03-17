@@ -2,6 +2,7 @@ const { Worker } = require('bullmq');
 const sharp = require('sharp');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
+const nodeFs = require('fs');
 const fs = require('fs').promises;
 const os = require('os');
 const { pipeline } = require('stream/promises');
@@ -61,7 +62,7 @@ async function processAsset(data) {
       if (assetType === 'image') {
         metadata = await processImageFromFile(inputPath, thumbnailName);
       } else if (assetType === 'video') {
-        metadata = await processVideoFromFile(inputPath, thumbnailName);
+        metadata = await processVideoFromFile(inputPath, fileName, thumbnailName);
       } else {
         metadata = await processDocumentFromFile(inputPath, mimeType, thumbnailName);
       }
@@ -95,7 +96,7 @@ async function processAsset(data) {
 
 async function downloadMinIOToFile(objectName, destPath) {
   const stream = await downloadFromMinIO(objectName);
-  await pipeline(stream, require('fs').createWriteStream(destPath));
+  await pipeline(stream, nodeFs.createWriteStream(destPath));
 }
 
 // Process image: generate thumbnail and extract metadata
@@ -128,7 +129,7 @@ async function processImageFromFile(inputPath, thumbnailName) {
 }
 
 // Process video: extract thumbnail, metadata, and transcode
-async function processVideoFromFile(inputPath, thumbnailName) {
+async function processVideoFromFile(inputPath, fileName, thumbnailName) {
   console.log('Processing video...');
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-video-'));
@@ -145,10 +146,12 @@ async function processVideoFromFile(inputPath, thumbnailName) {
     const thumbnailBuffer = await fs.readFile(thumbnailPath);
     await uploadToMinIO(thumbnailName, thumbnailBuffer, 'image/jpeg');
 
-    // Transcode video to different resolutions (optional, can be heavy)
-    // await transcodeVideo(inputPath, fileName, metadata);
+    const renditions = await transcodeVideo(inputPath, fileName, metadata, tempDir);
 
-    return metadata;
+    return {
+      ...metadata,
+      renditions,
+    };
   } finally {
     // Cleanup temp files
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -197,23 +200,36 @@ function generateVideoThumbnail(inputPath, outputPath) {
 }
 
 // Transcode video to multiple resolutions
-async function transcodeVideo(inputPath, fileName, metadata) {
+async function transcodeVideo(inputPath, fileName, metadata, outputDir) {
   const resolutions = config.processing.video.resolutions;
   const baseName = fileName.replace(/\.[^/.]+$/, '');
+  const renditions = [];
 
   for (const resolution of resolutions) {
     // Skip if original is smaller
     if (metadata.height < resolution) continue;
 
     const outputFileName = `${baseName}_${resolution}p.mp4`;
-    const outputPath = path.join(os.tmpdir(), outputFileName);
+    const outputPath = path.join(outputDir || os.tmpdir(), outputFileName);
 
     try {
       await transcodeToResolution(inputPath, outputPath, resolution);
 
       // Upload transcoded file
-      const transcodedBuffer = await fs.readFile(outputPath);
-      await uploadToMinIO(outputFileName, transcodedBuffer, 'video/mp4');
+      const transcodedStat = await fs.stat(outputPath);
+      await uploadToMinIO(
+        outputFileName,
+        nodeFs.createReadStream(outputPath),
+        'video/mp4',
+        transcodedStat.size,
+      );
+
+      renditions.push({
+        height: resolution,
+        fileName: outputFileName,
+        mimeType: 'video/mp4',
+        size: transcodedStat.size,
+      });
 
       // Cleanup
       await fs.unlink(outputPath);
@@ -223,6 +239,8 @@ async function transcodeVideo(inputPath, fileName, metadata) {
       console.error(`Failed to transcode to ${resolution}p:`, error);
     }
   }
+
+  return renditions;
 }
 
 // Transcode video to specific resolution
@@ -255,41 +273,8 @@ async function processDocumentFromFile(inputPath, mimeType, thumbnailName) {
 
     // Handle PDF documents
     if (mimeType === 'application/pdf') {
-      const outputPrefix = path.join(tempDir, 'page');
-
-      try {
-        // Convert first page of PDF to PNG
-        const opts = {
-          format: 'png',
-          out_dir: tempDir,
-          out_prefix: 'page',
-          page: 1,
-        };
-
-        await convert(inputPath, opts);
-
-        // Read the generated PNG
-        const pngPath = path.join(tempDir, 'page-1.png');
-        const pngBuffer = await fs.readFile(pngPath);
-
-        // Resize PNG to thumbnail using Sharp
-        thumbnailBuffer = await sharp(pngBuffer)
-          .resize(config.processing.thumbnail.width, null, {
-            fit: 'inside',
-            withoutEnlargement: true,
-          })
-          .jpeg({ quality: config.processing.thumbnail.quality })
-          .toBuffer();
-
-        console.log(`PDF thumbnail generated: ${thumbnailBuffer.length} bytes`);
-
-        // Extract PDF metadata (page count, etc.)
-        // This is a simple implementation - you can enhance with pdf-lib for more details
-        metadata.isPDF = true;
-      } catch (pdfError) {
-        console.warn('PDF thumbnail generation failed, creating placeholder:', pdfError.message);
-        thumbnailBuffer = await createPlaceholderThumbnail('PDF', 'application/pdf');
-      }
+      thumbnailBuffer = await createPlaceholderThumbnail('PDF', 'application/pdf');
+      metadata.isPDF = true;
     } else {
       // For other document types (Word, Excel, etc.), create placeholder thumbnail
       console.log(`Creating placeholder thumbnail for ${mimeType}`);
