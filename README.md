@@ -30,12 +30,14 @@ Digital Asset Management Platform backend with Node.js, Express, BullMQ, MinIO, 
 ## Quick Start (Docker)
 
 1. **Clone and setup**
+
    ```bash
    cd backend
    cp .env.example .env
    ```
 
 2. **Start all services**
+
    ```bash
    docker-compose up -d
    ```
@@ -54,31 +56,37 @@ Digital Asset Management Platform backend with Node.js, Express, BullMQ, MinIO, 
 ## Local Development (without Docker)
 
 1. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 2. **Setup PostgreSQL**
+
    ```bash
    createdb dam_platform
    ```
 
 3. **Start Redis**
+
    ```bash
    redis-server
    ```
 
 4. **Start MinIO**
+
    ```bash
    minio server /data
    ```
 
 5. **Run migrations**
+
    ```bash
    npm run migrate
    ```
 
 6. **Start API server**
+
    ```bash
    npm run dev
    ```
@@ -106,6 +114,7 @@ Digital Asset Management Platform backend with Node.js, Express, BullMQ, MinIO, 
 ### Query Parameters
 
 **GET /api/assets**
+
 - `type`: Filter by type (image, video, document, all)
 - `search`: Search by name or tags
 - `sortBy`: Sort field (uploaded_at, name, downloads)
@@ -118,6 +127,7 @@ Digital Asset Management Platform backend with Node.js, Express, BullMQ, MinIO, 
 See `.env.example` for all configuration options.
 
 Key variables:
+
 - `DATABASE_URL`: PostgreSQL connection string
 - `REDIS_HOST`: Redis host
 - `MINIO_ENDPOINT`: MinIO endpoint
@@ -134,11 +144,13 @@ docker-compose up -d
 ### Production (Docker Swarm)
 
 1. **Initialize Swarm**
+
    ```bash
    docker swarm init
    ```
 
 2. **Build and push images**
+
    ```bash
    docker build -t your-registry/dam-api:latest -f Dockerfile .
    docker build -t your-registry/dam-worker:latest -f Dockerfile.worker .
@@ -147,11 +159,13 @@ docker-compose up -d
    ```
 
 3. **Deploy stack**
+
    ```bash
    docker stack deploy -c docker-compose.swarm.yml dam
    ```
 
 4. **Scale workers**
+
    ```bash
    docker service scale dam_worker=5
    ```
@@ -218,13 +232,13 @@ spec:
   minReplicas: 2
   maxReplicas: 10
   metrics:
-  - type: External
-    external:
-      metric:
-        name: bullmq_queue_waiting
-      target:
-        type: AverageValue
-        averageValue: "10"
+    - type: External
+      external:
+        metric:
+          name: bullmq_queue_waiting
+        target:
+          type: AverageValue
+          averageValue: '10'
 ```
 
 ## Monitoring
@@ -232,6 +246,7 @@ spec:
 ### BullMQ Dashboard
 
 Access at http://localhost:3002 to monitor:
+
 - Active jobs
 - Completed jobs
 - Failed jobs

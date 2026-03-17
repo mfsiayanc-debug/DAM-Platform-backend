@@ -44,8 +44,8 @@ async function uploadAssets(req, res, next) {
           fileName,
           thumbnailName,
           JSON.stringify(tags),
-          'processing'
-        ]
+          'processing',
+        ],
       );
 
       const asset = result.rows[0];
@@ -95,7 +95,9 @@ async function getThumbnail(req, res, next) {
 
     // Check if thumbnail processing is complete
     if (asset.status === 'processing') {
-      return res.status(202).json({ message: 'Thumbnail is being generated', status: 'processing' });
+      return res
+        .status(202)
+        .json({ message: 'Thumbnail is being generated', status: 'processing' });
     }
 
     if (asset.status === 'failed') {
@@ -123,13 +125,13 @@ async function getThumbnail(req, res, next) {
 // Get all assets with filters
 async function getAssets(req, res, next) {
   try {
-    const { 
-      type, 
-      search, 
-      sortBy = 'uploaded_at', 
+    const {
+      type,
+      search,
+      sortBy = 'uploaded_at',
       order = 'DESC',
       limit = 50,
-      offset = 0 
+      offset = 0,
     } = req.query;
 
     let query = 'SELECT * FROM assets WHERE 1=1';
@@ -230,10 +232,7 @@ async function downloadAsset(req, res, next) {
     const asset = result.rows[0];
 
     // Increment download count
-    await db.query(
-      'UPDATE assets SET downloads = downloads + 1 WHERE id = $1',
-      [id]
-    );
+    await db.query('UPDATE assets SET downloads = downloads + 1 WHERE id = $1', [id]);
 
     // Get file from MinIO
     const fileStream = await downloadFromMinIO(asset.file_path);
@@ -285,10 +284,10 @@ async function updateAssetTags(req, res, next) {
       return res.status(400).json({ error: 'Tags must be an array' });
     }
 
-    const result = await db.query(
-      'UPDATE assets SET tags = $1 WHERE id = $2 RETURNING *',
-      [JSON.stringify(tags), id]
-    );
+    const result = await db.query('UPDATE assets SET tags = $1 WHERE id = $2 RETURNING *', [
+      JSON.stringify(tags),
+      id,
+    ]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Asset not found' });
@@ -303,21 +302,21 @@ async function updateAssetTags(req, res, next) {
 // Helper: Generate tags from filename and mime type
 function generateTags(filename, mimeType) {
   const tags = [];
-  
+
   // Add type tag
   if (mimeType.startsWith('image/')) tags.push('image');
   if (mimeType.startsWith('video/')) tags.push('video');
   if (mimeType.startsWith('application/')) tags.push('document');
-  
+
   // Extract tags from filename
   const nameParts = filename
     .toLowerCase()
     .replace(/\.[^/.]+$/, '') // Remove extension
     .split(/[-_\s]+/)
-    .filter(part => part.length > 2);
-  
+    .filter((part) => part.length > 2);
+
   tags.push(...nameParts.slice(0, 5));
-  
+
   return [...new Set(tags)];
 }
 
@@ -346,5 +345,5 @@ module.exports = {
   downloadAsset,
   deleteAsset,
   updateAssetTags,
-  getThumbnail
+  getThumbnail,
 };

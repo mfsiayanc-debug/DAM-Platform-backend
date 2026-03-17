@@ -95,7 +95,7 @@ describe('worker processing logic', () => {
     expect(storage.uploadToMinIO).toHaveBeenCalledWith(
       'thumb.jpg',
       expect.any(Buffer),
-      'image/jpeg'
+      'image/jpeg',
     );
 
     expect(result).toMatchObject({
@@ -115,7 +115,7 @@ describe('worker processing logic', () => {
     expect(storage.uploadToMinIO).toHaveBeenCalledWith(
       'doc-thumb.jpg',
       expect.any(Buffer),
-      'image/jpeg'
+      'image/jpeg',
     );
 
     expect(result).toMatchObject({
@@ -129,7 +129,7 @@ describe('worker processing logic', () => {
     expect(storage.uploadToMinIO).toHaveBeenCalledWith(
       'video-thumb.jpg',
       expect.any(Buffer),
-      'image/jpeg'
+      'image/jpeg',
     );
   });
 
@@ -147,8 +147,7 @@ describe('worker processing logic', () => {
 
     expect(db.query).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE assets'),
-      expect.arrayContaining(['completed', expect.any(String), assetId])
+      expect.arrayContaining(['completed', expect.any(String), assetId]),
     );
   });
 });
-

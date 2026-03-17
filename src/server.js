@@ -10,10 +10,12 @@ const app = express();
 
 // Middleware
 app.use(helmet());
-app.use(cors({
-  origin: config.server.frontendUrl,
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: config.server.frontendUrl,
+    credentials: true,
+  }),
+);
 app.use(morgan('combined'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -29,7 +31,7 @@ app.use('/api', routes);
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Error:', err);
-  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.status(err.status || 500).json({
     error: {
       message: err.message || 'Internal Server Error',

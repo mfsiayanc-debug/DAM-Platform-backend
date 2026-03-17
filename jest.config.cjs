@@ -3,4 +3,3 @@ module.exports = {
   clearMocks: true,
   testMatch: ['**/tests/**/*.test.js'],
 };
-

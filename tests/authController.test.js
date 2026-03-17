@@ -153,4 +153,3 @@ describe('authController', () => {
     expect(data).toHaveProperty('token', 'jwt-token');
   });
 });
-

@@ -4,9 +4,7 @@ const config = require('../config');
 // Simple JWT auth middleware
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ')
-    ? authHeader.slice('Bearer '.length)
-    : null;
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null;
 
   if (!token) {
     return res.status(401).json({ error: 'Authentication required' });
@@ -24,4 +22,3 @@ function authenticate(req, res, next) {
 module.exports = {
   authenticate,
 };
-

@@ -37,14 +37,14 @@ if (process.env.NODE_ENV !== 'test') {
     {
       connection,
       concurrency: config.queue.concurrency,
-    }
+    },
   );
 }
 
 // Process asset (thumbnails, metadata, video transcoding)
 async function processAsset(data) {
   const { assetId, fileName, thumbnailName, assetType, mimeType } = data;
-  
+
   console.log(`Processing asset ${assetId} (${assetType})`);
 
   try {
@@ -74,21 +74,21 @@ async function processAsset(data) {
       `UPDATE assets 
        SET status = $1, metadata = $2, updated_at = CURRENT_TIMESTAMP 
        WHERE id = $3`,
-      ['completed', JSON.stringify(metadata), assetId]
+      ['completed', JSON.stringify(metadata), assetId],
     );
 
     console.log(`Asset ${assetId} processed successfully`);
   } catch (error) {
     console.error(`Failed to process asset ${assetId}:`, error);
-    
+
     // Mark as failed
     await db.query(
       `UPDATE assets 
        SET status = $1, updated_at = CURRENT_TIMESTAMP 
        WHERE id = $2`,
-      ['failed', assetId]
+      ['failed', assetId],
     );
-    
+
     throw error;
   }
 }
@@ -101,7 +101,7 @@ async function downloadMinIOToFile(objectName, destPath) {
 // Process image: generate thumbnail and extract metadata
 async function processImageFromFile(inputPath, thumbnailName) {
   console.log('Processing image...');
-  
+
   const image = sharp(inputPath);
   const metadata = await image.metadata();
 
@@ -130,7 +130,7 @@ async function processImageFromFile(inputPath, thumbnailName) {
 // Process video: extract thumbnail, metadata, and transcode
 async function processVideoFromFile(inputPath, thumbnailName) {
   console.log('Processing video...');
-  
+
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-video-'));
   const thumbnailPath = path.join(tempDir, 'thumbnail.jpg');
 
@@ -164,8 +164,8 @@ function getVideoMetadata(inputPath) {
         return;
       }
 
-      const videoStream = metadata.streams.find(s => s.codec_type === 'video');
-      const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
+      const videoStream = metadata.streams.find((s) => s.codec_type === 'video');
+      const audioStream = metadata.streams.find((s) => s.codec_type === 'audio');
 
       resolve({
         duration: Math.round(metadata.format.duration),
@@ -210,14 +210,14 @@ async function transcodeVideo(inputPath, fileName, metadata) {
 
     try {
       await transcodeToResolution(inputPath, outputPath, resolution);
-      
+
       // Upload transcoded file
       const transcodedBuffer = await fs.readFile(outputPath);
       await uploadToMinIO(outputFileName, transcodedBuffer, 'video/mp4');
-      
+
       // Cleanup
       await fs.unlink(outputPath);
-      
+
       console.log(`Transcoded to ${resolution}p`);
     } catch (error) {
       console.error(`Failed to transcode to ${resolution}p:`, error);
@@ -232,10 +232,7 @@ function transcodeToResolution(inputPath, outputPath, height) {
       .videoCodec(config.processing.video.codec)
       .audioCodec(config.processing.video.audioCodec)
       .size(`?x${height}`)
-      .outputOptions([
-        '-preset fast',
-        '-crf 23',
-      ])
+      .outputOptions(['-preset fast', '-crf 23'])
       .output(outputPath)
       .on('end', resolve)
       .on('error', reject)
@@ -247,9 +244,9 @@ function transcodeToResolution(inputPath, outputPath, height) {
 async function processDocumentFromFile(inputPath, mimeType, thumbnailName) {
   console.log('Processing document...');
   console.log(`Thumbnail will be saved as: ${thumbnailName}`);
-  
+
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-document-'));
-  
+
   try {
     let thumbnailBuffer;
     let metadata = {
@@ -259,7 +256,7 @@ async function processDocumentFromFile(inputPath, mimeType, thumbnailName) {
     // Handle PDF documents
     if (mimeType === 'application/pdf') {
       const outputPrefix = path.join(tempDir, 'page');
-      
+
       try {
         // Convert first page of PDF to PNG
         const opts = {
@@ -270,11 +267,11 @@ async function processDocumentFromFile(inputPath, mimeType, thumbnailName) {
         };
 
         await convert(inputPath, opts);
-        
+
         // Read the generated PNG
         const pngPath = path.join(tempDir, 'page-1.png');
         const pngBuffer = await fs.readFile(pngPath);
-        
+
         // Resize PNG to thumbnail using Sharp
         thumbnailBuffer = await sharp(pngBuffer)
           .resize(config.processing.thumbnail.width, null, {
@@ -283,13 +280,12 @@ async function processDocumentFromFile(inputPath, mimeType, thumbnailName) {
           })
           .jpeg({ quality: config.processing.thumbnail.quality })
           .toBuffer();
-        
+
         console.log(`PDF thumbnail generated: ${thumbnailBuffer.length} bytes`);
-        
+
         // Extract PDF metadata (page count, etc.)
         // This is a simple implementation - you can enhance with pdf-lib for more details
         metadata.isPDF = true;
-        
       } catch (pdfError) {
         console.warn('PDF thumbnail generation failed, creating placeholder:', pdfError.message);
         thumbnailBuffer = await createPlaceholderThumbnail('PDF', 'application/pdf');
@@ -367,11 +363,8 @@ async function createPlaceholderThumbnail(label, mimeType) {
     </svg>
   `;
 
-  return sharp(Buffer.from(svg))
-    .jpeg({ quality: config.processing.thumbnail.quality })
-    .toBuffer();
+  return sharp(Buffer.from(svg)).jpeg({ quality: config.processing.thumbnail.quality }).toBuffer();
 }
-
 
 if (worker) {
   // Worker event handlers

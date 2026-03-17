@@ -79,7 +79,7 @@ describe('assetController', () => {
         fileName: expect.stringContaining('.jpg'),
         thumbnailName: expect.stringContaining('_thumb.jpg'),
         assetType: 'image',
-      })
+      }),
     );
     expect(res.statusCode).toBe(201);
   });
@@ -231,4 +231,3 @@ describe('assetController', () => {
     expect(res.statusCode).toBe(202);
   });
 });
-

@@ -22,7 +22,7 @@ async function signup(req, res, next) {
       `INSERT INTO users (email, password_hash)
        VALUES ($1, $2)
        RETURNING id, email, role, created_at`,
-      [email, passwordHash]
+      [email, passwordHash],
     );
 
     const user = result.rows[0];
@@ -52,7 +52,7 @@ async function login(req, res, next) {
 
     const result = await db.query(
       'SELECT id, email, password_hash, role, created_at FROM users WHERE email = $1',
-      [email]
+      [email],
     );
 
     if (result.rows.length === 0) {
@@ -97,4 +97,3 @@ module.exports = {
   signup,
   login,
 };
-

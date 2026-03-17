@@ -9,7 +9,7 @@ const {
   downloadAsset,
   deleteAsset,
   updateAssetTags,
-  getThumbnail
+  getThumbnail,
 } = require('../controllers/assetController');
 
 const router = express.Router();
@@ -34,7 +34,7 @@ const upload = multer({
       'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ];
-    
+
     if (allowedMimes.includes(file.mimetype)) {
       cb(null, true);
     } else {
