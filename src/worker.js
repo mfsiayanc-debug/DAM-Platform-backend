@@ -10,32 +10,36 @@ const { connection } = require('./services/queue');
 const { uploadToMinIO, downloadFromMinIO } = require('./services/storage');
 const db = require('./db');
 
-console.log('Starting Asset Processing Worker...');
+let worker = null;
 
-// Create worker
-const worker = new Worker(
-  config.queue.name,
-  async (job) => {
-    console.log(`Processing job ${job.id}:`, job.name);
+if (process.env.NODE_ENV !== 'test') {
+  console.log('Starting Asset Processing Worker...');
 
-    try {
-      switch (job.name) {
-        case 'process-asset':
-          await processAsset(job.data);
-          break;
-        default:
-          console.warn(`Unknown job type: ${job.name}`);
+  // Create worker
+  worker = new Worker(
+    config.queue.name,
+    async (job) => {
+      console.log(`Processing job ${job.id}:`, job.name);
+
+      try {
+        switch (job.name) {
+          case 'process-asset':
+            await processAsset(job.data);
+            break;
+          default:
+            console.warn(`Unknown job type: ${job.name}`);
+        }
+      } catch (error) {
+        console.error(`Job ${job.id} failed:`, error);
+        throw error;
       }
-    } catch (error) {
-      console.error(`Job ${job.id} failed:`, error);
-      throw error;
+    },
+    {
+      connection,
+      concurrency: config.queue.concurrency,
     }
-  },
-  {
-    connection,
-    concurrency: config.queue.concurrency,
-  }
-);
+  );
+}
 
 // Process asset (thumbnails, metadata, video transcoding)
 async function processAsset(data) {
@@ -369,31 +373,46 @@ async function createPlaceholderThumbnail(label, mimeType) {
 }
 
 
-// Worker event handlers
-worker.on('completed', (job) => {
-  console.log(`Job ${job.id} completed successfully`);
-});
+if (worker) {
+  // Worker event handlers
+  worker.on('completed', (job) => {
+    console.log(`Job ${job.id} completed successfully`);
+  });
 
-worker.on('failed', (job, err) => {
-  console.error(`Job ${job?.id} failed:`, err.message);
-});
+  worker.on('failed', (job, err) => {
+    console.error(`Job ${job?.id} failed:`, err.message);
+  });
 
-worker.on('error', (err) => {
-  console.error('Worker error:', err);
-});
+  worker.on('error', (err) => {
+    console.error('Worker error:', err);
+  });
 
-console.log(`Worker started with concurrency: ${config.queue.concurrency}`);
-console.log('Waiting for jobs...');
+  console.log(`Worker started with concurrency: ${config.queue.concurrency}`);
+  console.log('Waiting for jobs...');
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, closing worker...');
-  await worker.close();
-  process.exit(0);
-});
+  // Graceful shutdown
+  process.on('SIGTERM', async () => {
+    console.log('SIGTERM received, closing worker...');
+    await worker.close();
+    process.exit(0);
+  });
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received, closing worker...');
-  await worker.close();
-  process.exit(0);
-});
+  process.on('SIGINT', async () => {
+    console.log('SIGINT received, closing worker...');
+    await worker.close();
+    process.exit(0);
+  });
+}
+
+module.exports = {
+  worker,
+  processAsset,
+  processImageFromFile,
+  processVideoFromFile,
+  processDocumentFromFile,
+  downloadMinIOToFile,
+  getVideoMetadata,
+  generateVideoThumbnail,
+  transcodeVideo,
+  transcodeToResolution,
+};

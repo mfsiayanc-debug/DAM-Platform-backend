@@ -7,7 +7,11 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "worker": "node src/worker.js",
-    "migrate": "node src/db/migrate.js"
+    "migrate": "node src/db/migrate.js",
+    "test": "jest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "keywords": ["dam", "asset-management", "bullmq", "minio"],
   "author": "",
@@ -32,6 +36,10 @@
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0",
+    "eslint": "^9.9.1",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3"
   }
 }
