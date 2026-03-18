@@ -30,6 +30,7 @@ module.exports = {
     accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
     secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
     bucket: process.env.MINIO_BUCKET || 'dam-assets',
+    presignedExpirySeconds: parseInt(process.env.MINIO_PRESIGNED_EXPIRY_SECONDS) || 3600,
   },
 
   queue: {

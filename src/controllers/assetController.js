@@ -1,5 +1,6 @@
-const { downloadFromMinIO, deleteFromMinIO } = require('../services/storage');
+const { downloadFromMinIO, deleteFromMinIO, getPresignedUrl } = require('../services/storage');
 const { createAssetFromUpload } = require('../services/uploadPipeline');
+const config = require('../config');
 const db = require('../db');
 
 // Upload multiple assets
@@ -173,7 +174,7 @@ async function getAssets(req, res, next) {
     const total = parseInt(countResult.rows[0].count);
 
     res.json({
-      assets: result.rows.map(formatAsset),
+      assets: await Promise.all(result.rows.map((asset) => formatAsset(asset))),
       pagination: {
         total,
         limit: parseInt(limit),
@@ -195,7 +196,7 @@ async function getAssetById(req, res, next) {
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    res.json(formatAsset(asset));
+    res.json(await formatAsset(asset));
   } catch (error) {
     next(error);
   }
@@ -280,7 +281,29 @@ async function updateAssetTags(req, res, next) {
 }
 
 // Helper: Format asset for API response
-function formatAsset(asset) {
+async function formatAsset(asset) {
+  let thumbnailUrl = `/api/assets/${asset.id}/thumbnail`;
+  let assetUrl = `/api/assets/${asset.id}/download`;
+
+  try {
+    if (asset.thumbnail_path && asset.status === 'completed') {
+      thumbnailUrl = await getPresignedUrl(
+        asset.thumbnail_path,
+        config.minio.presignedExpirySeconds,
+      );
+    }
+  } catch (error) {
+    console.error(`Failed to create thumbnail presigned URL for asset ${asset.id}:`, error);
+  }
+
+  try {
+    if (asset.file_path && asset.status === 'completed') {
+      assetUrl = await getPresignedUrl(asset.file_path, config.minio.presignedExpirySeconds);
+    }
+  } catch (error) {
+    console.error(`Failed to create file presigned URL for asset ${asset.id}:`, error);
+  }
+
   return {
     id: asset.id,
     name: asset.name,
@@ -288,8 +311,8 @@ function formatAsset(asset) {
     size: asset.size,
     mimeType: asset.mime_type,
     uploadedAt: asset.uploaded_at,
-    thumbnailUrl: `/api/assets/${asset.id}/thumbnail`,
-    url: `/api/assets/${asset.id}/download`,
+    thumbnailUrl,
+    url: assetUrl,
     downloads: asset.downloads,
     tags: typeof asset.tags === 'string' ? JSON.parse(asset.tags) : asset.tags,
     metadata: typeof asset.metadata === 'string' ? JSON.parse(asset.metadata) : asset.metadata,
