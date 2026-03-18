@@ -30,6 +30,7 @@ module.exports = {
     accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
     secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
     bucket: process.env.MINIO_BUCKET || 'dam-assets',
+    presignedExpirySeconds: parseInt(process.env.MINIO_PRESIGNED_EXPIRY_SECONDS) || 3600,
   },
 
   queue: {
@@ -47,6 +48,8 @@ module.exports = {
       quality: parseInt(process.env.THUMBNAIL_QUALITY) || 80,
     },
     video: {
+      ffmpegPath: process.env.FFMPEG_PATH || undefined,
+      ffprobePath: process.env.FFPROBE_PATH || undefined,
       resolutions: (process.env.VIDEO_RESOLUTIONS || '1080,720,480')
         .split(',')
         .map((r) => parseInt(r)),

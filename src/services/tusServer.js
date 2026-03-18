@@ -3,6 +3,7 @@ const path = require('node:path');
 const { v4: uuidv4 } = require('uuid');
 const { Server } = require('@tus/server');
 const { FileStore } = require('@tus/file-store');
+const { EXPOSED_HEADERS } = require('@tus/utils');
 const config = require('../config');
 const { getUserFromRequest } = require('../middleware/auth');
 const { createAssetFromUpload, isMimeTypeAllowed } = require('./uploadPipeline');
@@ -69,6 +70,7 @@ const tusServer = new Server({
       mimeType,
       size: upload.size,
       sourcePath: filePath,
+      ownerId: req.user.id,
     });
 
     await datastore.remove(upload.id);
@@ -81,6 +83,35 @@ const tusServer = new Server({
     };
   },
 });
+
+const originalTusHandle = tusServer.handle.bind(tusServer);
+tusServer.handle = async (req, res) => {
+  const originalSetHeader = res.setHeader.bind(res);
+
+  res.setHeader = (name, value) => {
+    if (typeof name === 'string' && name.toLowerCase() === 'access-control-expose-headers') {
+      const existingValues = String(value)
+        .split(',')
+        .map((header) => header.trim())
+        .filter(Boolean);
+
+      if (!existingValues.includes('Upload-Completed-Asset-Id')) {
+        existingValues.push('Upload-Completed-Asset-Id');
+      }
+
+      return originalSetHeader(name, existingValues.join(', '));
+    }
+
+    return originalSetHeader(name, value);
+  };
+
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    `${EXPOSED_HEADERS}, Upload-Completed-Asset-Id`,
+  );
+
+  return originalTusHandle(req, res);
+};
 
 module.exports = {
   resumableUploadPath,
