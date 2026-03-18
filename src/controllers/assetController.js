@@ -65,6 +65,7 @@ async function getThumbnail(req, res, next) {
 
       res.setHeader('Content-Type', 'image/jpeg');
       res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
       fileStream.pipe(res);
     } catch (storageError) {
@@ -194,6 +195,7 @@ async function downloadAsset(req, res, next) {
 
     res.setHeader('Content-Type', asset.mime_type);
     res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
     fileStream.pipe(res);
   } catch (error) {

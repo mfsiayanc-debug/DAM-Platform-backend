@@ -47,6 +47,8 @@ module.exports = {
       quality: parseInt(process.env.THUMBNAIL_QUALITY) || 80,
     },
     video: {
+      ffmpegPath: process.env.FFMPEG_PATH || undefined,
+      ffprobePath: process.env.FFPROBE_PATH || undefined,
       resolutions: (process.env.VIDEO_RESOLUTIONS || '1080,720,480')
         .split(',')
         .map((r) => parseInt(r)),

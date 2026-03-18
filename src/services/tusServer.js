@@ -3,6 +3,7 @@ const path = require('node:path');
 const { v4: uuidv4 } = require('uuid');
 const { Server } = require('@tus/server');
 const { FileStore } = require('@tus/file-store');
+const { EXPOSED_HEADERS } = require('@tus/utils');
 const config = require('../config');
 const { getUserFromRequest } = require('../middleware/auth');
 const { createAssetFromUpload, isMimeTypeAllowed } = require('./uploadPipeline');
@@ -81,6 +82,15 @@ const tusServer = new Server({
     };
   },
 });
+
+const originalTusHandle = tusServer.handle.bind(tusServer);
+tusServer.handle = async (req, res) => {
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    `${EXPOSED_HEADERS}, Upload-Completed-Asset-Id`,
+  );
+  return originalTusHandle(req, res);
+};
 
 module.exports = {
   resumableUploadPath,

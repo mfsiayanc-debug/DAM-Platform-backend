@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { v4: uuidv4 } = require('uuid');
+const FileType = require('file-type');
 const { uploadToMinIO } = require('./storage');
 const { addJob } = require('./queue');
 const db = require('../db');
@@ -51,6 +52,46 @@ function createStoredFileName(assetId, originalName) {
   return extension ? `${assetId}${extension.toLowerCase()}` : assetId;
 }
 
+function shouldStrictlyValidateMimeType(mimeType) {
+  return (
+    mimeType?.startsWith('image/') ||
+    mimeType?.startsWith('video/') ||
+    mimeType === 'application/pdf'
+  );
+}
+
+async function detectFileType({ buffer, sourcePath }) {
+  if (buffer) {
+    return FileType.fromBuffer(buffer);
+  }
+
+  if (sourcePath) {
+    return FileType.fromFile(sourcePath);
+  }
+
+  return undefined;
+}
+
+async function validateUploadContent({ originalName, mimeType, buffer, sourcePath }) {
+  if (!shouldStrictlyValidateMimeType(mimeType)) {
+    return;
+  }
+
+  const detectedFileType = await detectFileType({ buffer, sourcePath });
+
+  if (!detectedFileType) {
+    throw new Error(
+      `Uploaded content for ${originalName} does not match the declared file type ${mimeType}`,
+    );
+  }
+
+  if (detectedFileType.mime !== mimeType) {
+    throw new Error(
+      `Uploaded content for ${originalName} was detected as ${detectedFileType.mime}, not ${mimeType}`,
+    );
+  }
+}
+
 async function createAssetFromUpload({
   assetId = uuidv4(),
   originalName,
@@ -70,6 +111,13 @@ async function createAssetFromUpload({
   if (!buffer && !sourcePath) {
     throw new Error('Upload source is required');
   }
+
+  await validateUploadContent({
+    originalName,
+    mimeType,
+    buffer,
+    sourcePath,
+  });
 
   const fileName = createStoredFileName(assetId, originalName);
   const thumbnailName = `${assetId}_thumb.jpg`;

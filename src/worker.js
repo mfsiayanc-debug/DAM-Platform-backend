@@ -11,6 +11,14 @@ const { connection } = require('./services/queue');
 const { uploadToMinIO, downloadFromMinIO } = require('./services/storage');
 const db = require('./db');
 
+if (config.processing.video.ffmpegPath) {
+  ffmpeg.setFfmpegPath(config.processing.video.ffmpegPath);
+}
+
+if (config.processing.video.ffprobePath) {
+  ffmpeg.setFfprobePath(config.processing.video.ffprobePath);
+}
+
 let worker = null;
 
 if (process.env.NODE_ENV !== 'test') {
@@ -67,7 +75,7 @@ async function processAsset(data) {
         metadata = await processDocumentFromFile(inputPath, mimeType, thumbnailName);
       }
     } finally {
-      await fs.rm(tempDir, { recursive: true, force: true });
+      await removeDirectoryWithRetries(tempDir);
     }
 
     // Update asset in database
@@ -103,7 +111,10 @@ async function downloadMinIOToFile(objectName, destPath) {
 async function processImageFromFile(inputPath, thumbnailName) {
   console.log('Processing image...');
 
-  const image = sharp(inputPath);
+  // Read the file into memory first so Windows does not keep the temp file locked
+  // while Sharp is still finalizing native handles.
+  const inputBuffer = await fs.readFile(inputPath);
+  const image = sharp(inputBuffer);
   const metadata = await image.metadata();
 
   // Generate thumbnail
@@ -132,6 +143,8 @@ async function processImageFromFile(inputPath, thumbnailName) {
 async function processVideoFromFile(inputPath, fileName, thumbnailName) {
   console.log('Processing video...');
 
+  await ensureVideoTooling();
+
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-video-'));
   const thumbnailPath = path.join(tempDir, 'thumbnail.jpg');
 
@@ -154,8 +167,29 @@ async function processVideoFromFile(inputPath, fileName, thumbnailName) {
     };
   } finally {
     // Cleanup temp files
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await removeDirectoryWithRetries(tempDir);
   }
+}
+
+function ensureFfprobeAvailable() {
+  return new Promise((resolve, reject) => {
+    ffmpeg.getAvailableFormats((error) => {
+      if (error) {
+        reject(
+          new Error(
+            'FFmpeg/ffprobe is not available. Install FFmpeg and ensure ffmpeg/ffprobe are on PATH, or set FFMPEG_PATH and FFPROBE_PATH.',
+          ),
+        );
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+async function ensureVideoTooling() {
+  await ensureFfprobeAvailable();
 }
 
 // Get video metadata using ffmpeg
@@ -296,7 +330,28 @@ async function processDocumentFromFile(inputPath, mimeType, thumbnailName) {
     return metadata;
   } finally {
     // Cleanup temp files
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await removeDirectoryWithRetries(tempDir);
+  }
+}
+
+async function removeDirectoryWithRetries(targetPath, retries = 5, delayMs = 150) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      await fs.rm(targetPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const isLastAttempt = attempt === retries;
+      const isRetryableWindowsLock =
+        error &&
+        typeof error === 'object' &&
+        ['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error.code);
+
+      if (!isRetryableWindowsLock || isLastAttempt) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+    }
   }
 }
 
@@ -388,6 +443,8 @@ module.exports = {
   processImageFromFile,
   processVideoFromFile,
   processDocumentFromFile,
+  ensureVideoTooling,
+  removeDirectoryWithRetries,
   downloadMinIOToFile,
   getVideoMetadata,
   generateVideoThumbnail,
