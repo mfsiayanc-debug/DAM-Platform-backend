@@ -99,6 +99,7 @@ async function createAssetFromUpload({
   size,
   buffer,
   sourcePath,
+  ownerId,
 }) {
   if (!originalName) {
     throw new Error('Original file name is required');
@@ -110,6 +111,10 @@ async function createAssetFromUpload({
 
   if (!buffer && !sourcePath) {
     throw new Error('Upload source is required');
+  }
+
+  if (!ownerId) {
+    throw new Error('Asset owner is required');
   }
 
   await validateUploadContent({
@@ -131,11 +136,12 @@ async function createAssetFromUpload({
 
   const result = await db.query(
     `INSERT INTO assets 
-    (id, name, type, size, mime_type, file_path, thumbnail_path, tags, status)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    (id, user_id, name, type, size, mime_type, file_path, thumbnail_path, tags, status)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING *`,
     [
       assetId,
+      ownerId,
       originalName,
       assetType,
       uploadSize,

@@ -3,7 +3,11 @@ const config = require('../config');
 
 function getUserFromRequest(req) {
   const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null;
+  const queryToken =
+    req.query && typeof req.query.token === 'string' ? req.query.token : null;
+  const token = authHeader.startsWith('Bearer ')
+    ? authHeader.slice('Bearer '.length)
+    : queryToken;
 
   if (!token) {
     const error = new Error('Authentication required');

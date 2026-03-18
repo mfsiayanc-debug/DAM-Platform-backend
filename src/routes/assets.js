@@ -32,10 +32,10 @@ const upload = multer({
 
 // Routes
 router.post('/upload', authenticate, upload.array('files', 10), uploadAssets);
-router.get('/', getAssets);
-router.get('/:id', getAssetById);
-router.get('/:id/thumbnail', getThumbnail);
-router.get('/:id/download', downloadAsset);
+router.get('/', authenticate, getAssets);
+router.get('/:id', authenticate, getAssetById);
+router.get('/:id/thumbnail', authenticate, getThumbnail);
+router.get('/:id/download', authenticate, downloadAsset);
 router.delete('/:id', authenticate, deleteAsset);
 router.patch('/:id/tags', authenticate, updateAssetTags);
 

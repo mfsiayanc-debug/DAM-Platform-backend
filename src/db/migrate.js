@@ -18,6 +18,17 @@ async function runMigrations() {
   try {
     console.log('Running database migrations...');
 
+    // Users table for authentication
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     // Initial assets table + indexes (moved from db.initializeDatabase)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS assets (
@@ -38,6 +49,11 @@ async function runMigrations() {
     `);
 
     await pool.query(`
+      ALTER TABLE assets
+      ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+    `);
+
+    await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type);
     `);
 
@@ -53,15 +69,8 @@ async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_assets_tags ON assets USING GIN(tags);
     `);
 
-    // Users table for authentication
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        email VARCHAR(255) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        role VARCHAR(50) NOT NULL DEFAULT 'user',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
+      CREATE INDEX IF NOT EXISTS idx_assets_user_id ON assets(user_id);
     `);
 
     console.log('Database migrations completed successfully.');
