@@ -1,11 +1,20 @@
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const db = require('../db');
-const config = require('../config');
+import bcrypt from 'bcryptjs';
+import { NextFunction, Request, Response } from 'express';
+import jwt, { SignOptions } from 'jsonwebtoken';
+import config from '../config';
+import db from '../db';
 
-async function signup(req, res, next) {
+type AuthenticatedUserRecord = {
+  id: string;
+  email: string;
+  role: string;
+  created_at: string;
+  password_hash?: string;
+};
+
+async function signup(req: Request, res: Response, next: NextFunction) {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body as { email?: string; password?: string };
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
@@ -25,7 +34,7 @@ async function signup(req, res, next) {
       [email, passwordHash],
     );
 
-    const user = result.rows[0];
+    const user = result.rows[0] as AuthenticatedUserRecord;
     const token = signToken(user);
 
     res.status(201).json({
@@ -42,9 +51,9 @@ async function signup(req, res, next) {
   }
 }
 
-async function login(req, res, next) {
+async function login(req: Request, res: Response, next: NextFunction) {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body as { email?: string; password?: string };
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
@@ -59,8 +68,8 @@ async function login(req, res, next) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const user = result.rows[0];
-    const ok = await bcrypt.compare(password, user.password_hash);
+    const user = result.rows[0] as AuthenticatedUserRecord;
+    const ok = await bcrypt.compare(password, user.password_hash || '');
     if (!ok) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -81,19 +90,18 @@ async function login(req, res, next) {
   }
 }
 
-function signToken(user) {
+function signToken(user: AuthenticatedUserRecord): string {
   const payload = {
     sub: user.id,
     email: user.email,
     role: user.role || 'user',
   };
 
-  return jwt.sign(payload, config.auth.jwtSecret, {
-    expiresIn: config.auth.jwtExpiresIn || '1h',
-  });
+  const options: SignOptions = {
+    expiresIn: config.auth.jwtExpiresIn as SignOptions['expiresIn'],
+  };
+
+  return jwt.sign(payload, config.auth.jwtSecret, options);
 }
 
-module.exports = {
-  signup,
-  login,
-};
+export { signup, login };

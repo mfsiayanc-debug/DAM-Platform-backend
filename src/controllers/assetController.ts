@@ -1,24 +1,41 @@
-const { downloadFromMinIO, deleteFromMinIO, getPresignedUrl } = require('../services/storage');
-const { createAssetFromUpload } = require('../services/uploadPipeline');
-const config = require('../config');
-const db = require('../db');
+import { NextFunction, Request, Response } from 'express';
+import config from '../config';
+import db from '../db';
+import { deleteFromMinIO, downloadFromMinIO, getPresignedUrl } from '../services/storage';
+import { createAssetFromUpload } from '../services/uploadPipeline';
 
-// Upload multiple assets
-async function uploadAssets(req, res, next) {
+type AssetRecord = {
+  id: string;
+  user_id?: string;
+  name: string;
+  type: string;
+  size: number;
+  mime_type: string;
+  file_path: string;
+  thumbnail_path?: string | null;
+  tags: string | string[];
+  metadata?: string | Record<string, unknown> | null;
+  downloads: number;
+  status: string;
+  uploaded_at: string;
+};
+
+async function uploadAssets(req: Request, res: Response, next: NextFunction) {
   try {
-    if (!req.files || req.files.length === 0) {
+    const files = (req.files as Express.Multer.File[] | undefined) || [];
+    if (files.length === 0) {
       return res.status(400).json({ error: 'No files uploaded' });
     }
 
     const uploadedAssets = [];
 
-    for (const file of req.files) {
+    for (const file of files) {
       const asset = await createAssetFromUpload({
         originalName: file.originalname,
         mimeType: file.mimetype,
         size: file.size,
         buffer: file.buffer,
-        ownerId: req.user.id,
+        ownerId: req.user!.id,
       });
 
       uploadedAssets.push(asset);
@@ -33,36 +50,35 @@ async function uploadAssets(req, res, next) {
   }
 }
 
-function buildAssetScope(req, startIndex = 1) {
+function buildAssetScope(req: Request, startIndex = 1) {
   if (req.user?.role === 'admin') {
     return {
       clause: '',
-      params: [],
+      params: [] as string[],
       nextIndex: startIndex,
     };
   }
 
   return {
     clause: ` AND user_id = $${startIndex}`,
-    params: [req.user.id],
+    params: [req.user!.id],
     nextIndex: startIndex + 1,
   };
 }
 
-async function getOwnedAsset(req, assetId) {
+async function getOwnedAsset(req: Request, assetId: string): Promise<AssetRecord | null> {
   const scope = buildAssetScope(req, 2);
   const result = await db.query(`SELECT * FROM assets WHERE id = $1${scope.clause}`, [
     assetId,
     ...scope.params,
   ]);
 
-  return result.rows[0] || null;
+  return (result.rows[0] as AssetRecord | undefined) || null;
 }
 
-// Get thumbnail
-async function getThumbnail(req, res, next) {
+async function getThumbnail(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
     const asset = await getOwnedAsset(req, id);
 
     if (!asset) {
@@ -73,7 +89,6 @@ async function getThumbnail(req, res, next) {
       return res.status(404).json({ error: 'Thumbnail not available' });
     }
 
-    // Check if thumbnail processing is complete
     if (asset.status === 'processing') {
       return res
         .status(202)
@@ -84,18 +99,16 @@ async function getThumbnail(req, res, next) {
       return res.status(500).json({ error: 'Thumbnail generation failed' });
     }
 
-    // Get thumbnail from MinIO
     try {
       const fileStream = await downloadFromMinIO(asset.thumbnail_path);
 
       res.setHeader('Content-Type', 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
+      res.setHeader('Cache-Control', 'public, max-age=86400');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
       fileStream.pipe(res);
     } catch (storageError) {
       console.error(`Failed to retrieve thumbnail for asset ${id}:`, storageError);
-      // If thumbnail doesn't exist in MinIO, return 404
       return res.status(404).json({ error: 'Thumbnail file not found in storage' });
     }
   } catch (error) {
@@ -103,57 +116,50 @@ async function getThumbnail(req, res, next) {
   }
 }
 
-// Get all assets with filters
-async function getAssets(req, res, next) {
+async function getAssets(req: Request, res: Response, next: NextFunction) {
   try {
     const {
       type,
       search,
       sortBy = 'uploaded_at',
       order = 'DESC',
-      limit = 50,
-      offset = 0,
-    } = req.query;
+      limit = '50',
+      offset = '0',
+    } = req.query as Record<string, string | undefined>;
 
     let query = 'SELECT * FROM assets WHERE 1=1';
     const scope = buildAssetScope(req, 1);
-    const params = [...scope.params];
+    const params: Array<string | number> = [...scope.params];
     let paramCount = scope.nextIndex;
     query += scope.clause;
 
-    // Filter by type
     if (type && type !== 'all') {
       query += ` AND type = $${paramCount}`;
       params.push(type);
       paramCount++;
     }
 
-    // Search by name or tags
     if (search) {
       query += ` AND (name ILIKE $${paramCount} OR tags::text ILIKE $${paramCount})`;
       params.push(`%${search}%`);
       paramCount++;
     }
 
-    // Only show completed assets
     query += ` AND status = 'completed'`;
 
-    // Sorting
     const allowedSortFields = ['uploaded_at', 'name', 'downloads', 'size'];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'uploaded_at';
     const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
     query += ` ORDER BY ${sortField} ${sortOrder}`;
 
-    // Pagination
     query += ` LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
-    params.push(parseInt(limit), parseInt(offset));
+    params.push(Number.parseInt(limit, 10), Number.parseInt(offset, 10));
 
     const result = await db.query(query, params);
 
-    // Get total count
     let countQuery = 'SELECT COUNT(*) FROM assets WHERE 1=1';
     const countScope = buildAssetScope(req, 1);
-    const countParams = [...countScope.params];
+    const countParams: Array<string | number> = [...countScope.params];
     let countParamIndex = countScope.nextIndex;
     countQuery += countScope.clause;
 
@@ -171,14 +177,17 @@ async function getAssets(req, res, next) {
     countQuery += ` AND status = 'completed'`;
 
     const countResult = await db.query(countQuery, countParams);
-    const total = parseInt(countResult.rows[0].count);
+    const countRow = countResult.rows[0] as { count: string };
+    const total = Number.parseInt(countRow.count, 10);
 
     res.json({
-      assets: await Promise.all(result.rows.map((asset) => formatAsset(asset))),
+      assets: await Promise.all(
+        result.rows.map((asset: unknown) => formatAsset(asset as AssetRecord)),
+      ),
       pagination: {
         total,
-        limit: parseInt(limit),
-        offset: parseInt(offset),
+        limit: Number.parseInt(limit, 10),
+        offset: Number.parseInt(offset, 10),
       },
     });
   } catch (error) {
@@ -186,10 +195,9 @@ async function getAssets(req, res, next) {
   }
 }
 
-// Get single asset by ID
-async function getAssetById(req, res, next) {
+async function getAssetById(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
     const asset = await getOwnedAsset(req, id);
 
     if (!asset) {
@@ -202,20 +210,17 @@ async function getAssetById(req, res, next) {
   }
 }
 
-// Download asset
-async function downloadAsset(req, res, next) {
+async function downloadAsset(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
     const asset = await getOwnedAsset(req, id);
 
     if (!asset) {
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    // Increment download count
     await db.query('UPDATE assets SET downloads = downloads + 1 WHERE id = $1', [id]);
 
-    // Get file from MinIO
     const fileStream = await downloadFromMinIO(asset.file_path);
 
     res.setHeader('Content-Type', asset.mime_type);
@@ -228,23 +233,20 @@ async function downloadAsset(req, res, next) {
   }
 }
 
-// Delete asset
-async function deleteAsset(req, res, next) {
+async function deleteAsset(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
     const asset = await getOwnedAsset(req, id);
 
     if (!asset) {
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    // Delete from MinIO
     await deleteFromMinIO(asset.file_path);
     if (asset.thumbnail_path) {
       await deleteFromMinIO(asset.thumbnail_path);
     }
 
-    // Delete from database
     const scope = buildAssetScope(req, 2);
     await db.query(`DELETE FROM assets WHERE id = $1${scope.clause}`, [id, ...scope.params]);
 
@@ -254,11 +256,10 @@ async function deleteAsset(req, res, next) {
   }
 }
 
-// Update asset tags
-async function updateAssetTags(req, res, next) {
+async function updateAssetTags(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
-    const { tags } = req.body;
+    const { tags } = req.body as { tags?: unknown };
 
     if (!Array.isArray(tags)) {
       return res.status(400).json({ error: 'Tags must be an array' });
@@ -274,14 +275,13 @@ async function updateAssetTags(req, res, next) {
       return res.status(404).json({ error: 'Asset not found' });
     }
 
-    res.json(formatAsset(result.rows[0]));
+    res.json(await formatAsset(result.rows[0] as AssetRecord));
   } catch (error) {
     next(error);
   }
 }
 
-// Helper: Format asset for API response
-async function formatAsset(asset) {
+async function formatAsset(asset: AssetRecord) {
   let thumbnailUrl = `/api/assets/${asset.id}/thumbnail`;
   let assetUrl = `/api/assets/${asset.id}/download`;
 
@@ -315,12 +315,13 @@ async function formatAsset(asset) {
     url: assetUrl,
     downloads: asset.downloads,
     tags: typeof asset.tags === 'string' ? JSON.parse(asset.tags) : asset.tags,
-    metadata: typeof asset.metadata === 'string' ? JSON.parse(asset.metadata) : asset.metadata,
+    metadata:
+      typeof asset.metadata === 'string' ? JSON.parse(asset.metadata) : (asset.metadata ?? {}),
     status: asset.status,
   };
 }
 
-module.exports = {
+export {
   uploadAssets,
   getAssets,
   getAssetById,

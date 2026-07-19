@@ -1,8 +1,7 @@
-const { Queue } = require('bullmq');
-const IORedis = require('ioredis');
-const config = require('../config');
+import IORedis from 'ioredis';
+import { JobsOptions, Queue } from 'bullmq';
+import config from '../config';
 
-// Create Redis connection
 const connection = new IORedis({
   host: config.redis.host,
   port: config.redis.port,
@@ -10,7 +9,6 @@ const connection = new IORedis({
   maxRetriesPerRequest: null,
 });
 
-// Create queue
 const assetQueue = new Queue(config.queue.name, {
   connection,
   defaultJobOptions: {
@@ -21,7 +19,7 @@ const assetQueue = new Queue(config.queue.name, {
     },
     removeOnComplete: {
       count: 100,
-      age: 3600, // Keep completed jobs for 1 hour
+      age: 3600,
     },
     removeOnFail: {
       count: 50,
@@ -29,8 +27,7 @@ const assetQueue = new Queue(config.queue.name, {
   },
 });
 
-// Add job to queue
-async function addJob(jobName, data, options = {}) {
+async function addJob(jobName: string, data: Record<string, unknown>, options: JobsOptions = {}) {
   try {
     const job = await assetQueue.add(jobName, data, options);
     console.log(`Job ${jobName} added to queue:`, job.id);
@@ -41,7 +38,6 @@ async function addJob(jobName, data, options = {}) {
   }
 }
 
-// Get queue metrics
 async function getQueueMetrics() {
   const [waiting, active, completed, failed] = await Promise.all([
     assetQueue.getWaitingCount(),
@@ -59,9 +55,4 @@ async function getQueueMetrics() {
   };
 }
 
-module.exports = {
-  assetQueue,
-  addJob,
-  getQueueMetrics,
-  connection,
-};
+export { assetQueue, addJob, getQueueMetrics, connection };

@@ -1,12 +1,34 @@
-const fs = require('node:fs');
-const path = require('node:path');
-const { v4: uuidv4 } = require('uuid');
-const { Server } = require('@tus/server');
-const { FileStore } = require('@tus/file-store');
-const { EXPOSED_HEADERS } = require('@tus/utils');
-const config = require('../config');
-const { getUserFromRequest } = require('../middleware/auth');
-const { createAssetFromUpload, isMimeTypeAllowed } = require('./uploadPipeline');
+import fs from 'node:fs';
+import path from 'node:path';
+import { IncomingMessage, ServerResponse } from 'http';
+import { FileStore } from '@tus/file-store';
+import { Server } from '@tus/server';
+import { EXPOSED_HEADERS } from '@tus/utils';
+import { v4 as uuidv4 } from 'uuid';
+import config from '../config';
+import { getUserFromRequest } from '../middleware/auth';
+import { createAssetFromUpload, isMimeTypeAllowed } from './uploadPipeline';
+
+type TusUpload = {
+  id: string;
+  size?: number;
+  metadata?: {
+    filename?: string;
+    filetype?: string;
+  };
+  storage?: {
+    path?: string;
+  };
+};
+
+type TusRequest = IncomingMessage & {
+  user?: {
+    id: string;
+    email?: string;
+    role?: string;
+  };
+  query?: Record<string, unknown>;
+};
 
 const resumableUploadPath = '/api/uploads/resumable';
 const uploadDirectory = path.join(process.cwd(), 'uploads', 'tus');
@@ -32,14 +54,14 @@ const tusServer = new Server({
     'X-HTTP-Method-Override',
   ],
   namingFunction: () => uuidv4(),
-  async onIncomingRequest(req) {
+  async onIncomingRequest(req: TusRequest) {
     if (req.method === 'OPTIONS') {
       return;
     }
 
-    req.user = getUserFromRequest(req);
+    req.user = getUserFromRequest(req as never);
   },
-  async onUploadCreate(req, res, upload) {
+  async onUploadCreate(_req: TusRequest, res: ServerResponse, upload: TusUpload) {
     const fileName = upload.metadata?.filename;
     const mimeType = upload.metadata?.filetype;
 
@@ -59,7 +81,7 @@ const tusServer = new Server({
       },
     };
   },
-  async onUploadFinish(req, res, upload) {
+  async onUploadFinish(req: TusRequest, res: ServerResponse, upload: TusUpload) {
     const originalName = upload.metadata?.filename || upload.id;
     const mimeType = upload.metadata?.filetype || 'application/octet-stream';
     const filePath = upload.storage?.path || path.join(uploadDirectory, upload.id);
@@ -70,7 +92,7 @@ const tusServer = new Server({
       mimeType,
       size: upload.size,
       sourcePath: filePath,
-      ownerId: req.user.id,
+      ownerId: req.user!.id,
     });
 
     await datastore.remove(upload.id);
@@ -85,10 +107,10 @@ const tusServer = new Server({
 });
 
 const originalTusHandle = tusServer.handle.bind(tusServer);
-tusServer.handle = async (req, res) => {
+const handleTusRequest = async (req: IncomingMessage, res: ServerResponse) => {
   const originalSetHeader = res.setHeader.bind(res);
 
-  res.setHeader = (name, value) => {
+  res.setHeader = (name: string, value: number | string | readonly string[]) => {
     if (typeof name === 'string' && name.toLowerCase() === 'access-control-expose-headers') {
       const existingValues = String(value)
         .split(',')
@@ -113,7 +135,6 @@ tusServer.handle = async (req, res) => {
   return originalTusHandle(req, res);
 };
 
-module.exports = {
-  resumableUploadPath,
-  tusServer,
-};
+(tusServer as unknown as { handle: typeof handleTusRequest }).handle = handleTusRequest;
+
+export { resumableUploadPath, tusServer };

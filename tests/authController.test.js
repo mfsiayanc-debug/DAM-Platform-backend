@@ -1,6 +1,6 @@
 const httpMocks = require('node-mocks-http');
 
-jest.mock('../src/db', () => ({
+jest.mock('../dist/db', () => ({
   query: jest.fn(),
 }));
 
@@ -13,10 +13,10 @@ jest.mock('jsonwebtoken', () => ({
   sign: jest.fn().mockReturnValue('jwt-token'),
 }));
 
-const db = require('../src/db');
+const db = require('../dist/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { signup, login } = require('../src/controllers/authController');
+const { signup, login } = require('../dist/controllers/authController');
 
 describe('authController', () => {
   beforeEach(() => {

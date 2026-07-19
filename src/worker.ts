@@ -1,15 +1,41 @@
-const { Worker } = require('bullmq');
-const sharp = require('sharp');
-const ffmpeg = require('fluent-ffmpeg');
-const path = require('path');
-const nodeFs = require('fs');
-const fs = require('fs').promises;
-const os = require('os');
-const { pipeline } = require('stream/promises');
-const config = require('./config');
-const { connection } = require('./services/queue');
-const { uploadToMinIO, downloadFromMinIO } = require('./services/storage');
-const db = require('./db');
+import nodeFs from 'fs';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { pipeline } from 'stream/promises';
+import { Worker } from 'bullmq';
+import ffmpeg from 'fluent-ffmpeg';
+import sharp from 'sharp';
+import config from './config';
+import db from './db';
+import { connection } from './services/queue';
+import { downloadFromMinIO, uploadToMinIO } from './services/storage';
+
+type AssetType = 'image' | 'video' | 'document';
+
+type ProcessAssetJobData = {
+  assetId: string;
+  fileName: string;
+  thumbnailName: string;
+  assetType: AssetType;
+  mimeType: string;
+};
+
+type FfmpegVideoStream = {
+  codec_type?: string;
+  width?: number;
+  height?: number;
+  codec_name?: string;
+  r_frame_rate?: string;
+};
+
+type FfprobeMetadata = {
+  format: {
+    duration?: number;
+    bit_rate?: string | number;
+  };
+  streams: Array<FfmpegVideoStream & { codec_type?: string }>;
+};
 
 if (config.processing.video.ffmpegPath) {
   ffmpeg.setFfmpegPath(config.processing.video.ffmpegPath);
@@ -19,12 +45,11 @@ if (config.processing.video.ffprobePath) {
   ffmpeg.setFfprobePath(config.processing.video.ffprobePath);
 }
 
-let worker = null;
+let worker: Worker | null = null;
 
 if (process.env.NODE_ENV !== 'test') {
   console.log('Starting Asset Processing Worker...');
 
-  // Create worker
   worker = new Worker(
     config.queue.name,
     async (job) => {
@@ -33,7 +58,7 @@ if (process.env.NODE_ENV !== 'test') {
       try {
         switch (job.name) {
           case 'process-asset':
-            await processAsset(job.data);
+            await processAsset(job.data as ProcessAssetJobData);
             break;
           default:
             console.warn(`Unknown job type: ${job.name}`);
@@ -50,17 +75,13 @@ if (process.env.NODE_ENV !== 'test') {
   );
 }
 
-// Process asset (thumbnails, metadata, video transcoding)
-async function processAsset(data) {
+async function processAsset(data: ProcessAssetJobData): Promise<void> {
   const { assetId, fileName, thumbnailName, assetType, mimeType } = data;
 
   console.log(`Processing asset ${assetId} (${assetType})`);
 
   try {
-    let metadata = {};
-
-    // Fetch original from MinIO without putting it in the queue payload.
-    // Download to a temp file so we don't need to hold large originals in RAM.
+    let metadata: Record<string, unknown> = {};
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-asset-'));
     const inputPath = path.join(tempDir, fileName);
 
@@ -78,7 +99,6 @@ async function processAsset(data) {
       await removeDirectoryWithRetries(tempDir);
     }
 
-    // Update asset in database
     await db.query(
       `UPDATE assets 
        SET status = $1, metadata = $2, updated_at = CURRENT_TIMESTAMP 
@@ -90,7 +110,6 @@ async function processAsset(data) {
   } catch (error) {
     console.error(`Failed to process asset ${assetId}:`, error);
 
-    // Mark as failed
     await db.query(
       `UPDATE assets 
        SET status = $1, updated_at = CURRENT_TIMESTAMP 
@@ -102,22 +121,18 @@ async function processAsset(data) {
   }
 }
 
-async function downloadMinIOToFile(objectName, destPath) {
+async function downloadMinIOToFile(objectName: string, destPath: string): Promise<void> {
   const stream = await downloadFromMinIO(objectName);
   await pipeline(stream, nodeFs.createWriteStream(destPath));
 }
 
-// Process image: generate thumbnail and extract metadata
-async function processImageFromFile(inputPath, thumbnailName) {
+async function processImageFromFile(inputPath: string, thumbnailName: string) {
   console.log('Processing image...');
 
-  // Read the file into memory first so Windows does not keep the temp file locked
-  // while Sharp is still finalizing native handles.
   const inputBuffer = await fs.readFile(inputPath);
   const image = sharp(inputBuffer);
   const metadata = await image.metadata();
 
-  // Generate thumbnail
   const thumbnailBuffer = await image
     .resize(config.processing.thumbnail.width, null, {
       fit: 'inside',
@@ -126,7 +141,6 @@ async function processImageFromFile(inputPath, thumbnailName) {
     .jpeg({ quality: config.processing.thumbnail.quality })
     .toBuffer();
 
-  // Upload thumbnail to MinIO
   await uploadToMinIO(thumbnailName, thumbnailBuffer, 'image/jpeg');
 
   return {
@@ -139,39 +153,7 @@ async function processImageFromFile(inputPath, thumbnailName) {
   };
 }
 
-// Process video: extract thumbnail, metadata, and transcode
-async function processVideoFromFile(inputPath, fileName, thumbnailName) {
-  console.log('Processing video...');
-
-  await ensureVideoTooling();
-
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-video-'));
-  const thumbnailPath = path.join(tempDir, 'thumbnail.jpg');
-
-  try {
-    // Extract metadata
-    const metadata = await getVideoMetadata(inputPath);
-
-    // Generate thumbnail at 1 second
-    await generateVideoThumbnail(inputPath, thumbnailPath);
-
-    // Upload thumbnail
-    const thumbnailBuffer = await fs.readFile(thumbnailPath);
-    await uploadToMinIO(thumbnailName, thumbnailBuffer, 'image/jpeg');
-
-    const renditions = await transcodeVideo(inputPath, fileName, metadata, tempDir);
-
-    return {
-      ...metadata,
-      renditions,
-    };
-  } finally {
-    // Cleanup temp files
-    await removeDirectoryWithRetries(tempDir);
-  }
-}
-
-function ensureFfprobeAvailable() {
+function ensureFfprobeAvailable(): Promise<void> {
   return new Promise((resolve, reject) => {
     ffmpeg.getAvailableFormats((error) => {
       if (error) {
@@ -188,14 +170,37 @@ function ensureFfprobeAvailable() {
   });
 }
 
-async function ensureVideoTooling() {
+async function ensureVideoTooling(): Promise<void> {
   await ensureFfprobeAvailable();
 }
 
-// Get video metadata using ffmpeg
-function getVideoMetadata(inputPath) {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(inputPath, (err, metadata) => {
+function parseFrameRate(frameRate?: string): number | undefined {
+  if (!frameRate) {
+    return undefined;
+  }
+
+  const [numeratorRaw, denominatorRaw] = frameRate.split('/');
+  const numerator = Number(numeratorRaw);
+  const denominator = Number(denominatorRaw || '1');
+
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return undefined;
+  }
+
+  return numerator / denominator;
+}
+
+function getVideoMetadata(inputPath: string) {
+  return new Promise<{
+    duration: number;
+    width?: number;
+    height?: number;
+    codec?: string;
+    bitrate?: string | number;
+    fps?: number;
+    hasAudio: boolean;
+  }>((resolve, reject) => {
+    ffmpeg.ffprobe(inputPath, (err, metadata: FfprobeMetadata) => {
       if (err) {
         reject(err);
         return;
@@ -203,22 +208,22 @@ function getVideoMetadata(inputPath) {
 
       const videoStream = metadata.streams.find((s) => s.codec_type === 'video');
       const audioStream = metadata.streams.find((s) => s.codec_type === 'audio');
+      const duration = metadata.format.duration ?? 0;
 
       resolve({
-        duration: Math.round(metadata.format.duration),
+        duration: Math.round(duration),
         width: videoStream?.width,
         height: videoStream?.height,
         codec: videoStream?.codec_name,
         bitrate: metadata.format.bit_rate,
-        fps: eval(videoStream?.r_frame_rate), // e.g., "30/1" -> 30
+        fps: parseFrameRate(videoStream?.r_frame_rate),
         hasAudio: !!audioStream,
       });
     });
   });
 }
 
-// Generate video thumbnail
-function generateVideoThumbnail(inputPath, outputPath) {
+function generateVideoThumbnail(inputPath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
       .screenshots({
@@ -228,20 +233,25 @@ function generateVideoThumbnail(inputPath, outputPath) {
         size: `${config.processing.thumbnail.width}x?`,
         timemarks: ['1'],
       })
-      .on('end', resolve)
+      .on('end', () => resolve())
       .on('error', reject);
   });
 }
 
-// Transcode video to multiple resolutions
-async function transcodeVideo(inputPath, fileName, metadata, outputDir) {
+type VideoMetadata = Awaited<ReturnType<typeof getVideoMetadata>>;
+
+async function transcodeVideo(
+  inputPath: string,
+  fileName: string,
+  metadata: VideoMetadata,
+  outputDir: string,
+) {
   const resolutions = config.processing.video.resolutions;
   const baseName = fileName.replace(/\.[^/.]+$/, '');
   const renditions = [];
 
   for (const resolution of resolutions) {
-    // Skip if original is smaller
-    if (metadata.height < resolution) continue;
+    if ((metadata.height ?? 0) < resolution) continue;
 
     const outputFileName = `${baseName}_${resolution}p.mp4`;
     const outputPath = path.join(outputDir || os.tmpdir(), outputFileName);
@@ -249,7 +259,6 @@ async function transcodeVideo(inputPath, fileName, metadata, outputDir) {
     try {
       await transcodeToResolution(inputPath, outputPath, resolution);
 
-      // Upload transcoded file
       const transcodedStat = await fs.stat(outputPath);
       await uploadToMinIO(
         outputFileName,
@@ -265,7 +274,6 @@ async function transcodeVideo(inputPath, fileName, metadata, outputDir) {
         size: transcodedStat.size,
       });
 
-      // Cleanup
       await fs.unlink(outputPath);
 
       console.log(`Transcoded to ${resolution}p`);
@@ -277,8 +285,7 @@ async function transcodeVideo(inputPath, fileName, metadata, outputDir) {
   return renditions;
 }
 
-// Transcode video to specific resolution
-function transcodeToResolution(inputPath, outputPath, height) {
+function transcodeToResolution(inputPath: string, outputPath: string, height: number): Promise<void> {
   return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
       .videoCodec(config.processing.video.codec)
@@ -286,37 +293,63 @@ function transcodeToResolution(inputPath, outputPath, height) {
       .size(`?x${height}`)
       .outputOptions(['-preset fast', '-crf 23'])
       .output(outputPath)
-      .on('end', resolve)
+      .on('end', () => resolve())
       .on('error', reject)
       .run();
   });
 }
 
-// Process document: extract metadata and generate thumbnail
-async function processDocumentFromFile(inputPath, mimeType, thumbnailName) {
+async function processVideoFromFile(inputPath: string, fileName: string, thumbnailName: string) {
+  console.log('Processing video...');
+
+  await ensureVideoTooling();
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-video-'));
+  const thumbnailPath = path.join(tempDir, 'thumbnail.jpg');
+
+  try {
+    const metadata = await getVideoMetadata(inputPath);
+    await generateVideoThumbnail(inputPath, thumbnailPath);
+
+    const thumbnailBuffer = await fs.readFile(thumbnailPath);
+    await uploadToMinIO(thumbnailName, thumbnailBuffer, 'image/jpeg');
+
+    const renditions = await transcodeVideo(inputPath, fileName, metadata, tempDir);
+
+    return {
+      ...metadata,
+      renditions,
+    };
+  } finally {
+    await removeDirectoryWithRetries(tempDir);
+  }
+}
+
+async function processDocumentFromFile(
+  inputPath: string,
+  mimeType: string,
+  thumbnailName: string,
+) {
   console.log('Processing document...');
   console.log(`Thumbnail will be saved as: ${thumbnailName}`);
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dam-document-'));
 
   try {
-    let thumbnailBuffer;
-    let metadata = {
+    let thumbnailBuffer: Buffer;
+    const metadata: Record<string, unknown> = {
       mimeType,
     };
 
-    // Handle PDF documents
     if (mimeType === 'application/pdf') {
       thumbnailBuffer = await createPlaceholderThumbnail('PDF', 'application/pdf');
       metadata.isPDF = true;
     } else {
-      // For other document types (Word, Excel, etc.), create placeholder thumbnail
       console.log(`Creating placeholder thumbnail for ${mimeType}`);
       const docType = getDocumentTypeLabel(mimeType);
       thumbnailBuffer = await createPlaceholderThumbnail(docType, mimeType);
     }
 
-    // Upload thumbnail to MinIO
     await uploadToMinIO(thumbnailName, thumbnailBuffer, 'image/jpeg');
     console.log(`Document thumbnail uploaded successfully: ${thumbnailName}`);
 
@@ -324,27 +357,28 @@ async function processDocumentFromFile(inputPath, mimeType, thumbnailName) {
       const stat = await fs.stat(inputPath);
       metadata.size = stat.size;
     } catch {
-      // Best-effort size; avoid failing processing for a missing stat
+      // Best-effort size only.
     }
 
     return metadata;
   } finally {
-    // Cleanup temp files
     await removeDirectoryWithRetries(tempDir);
   }
 }
 
-async function removeDirectoryWithRetries(targetPath, retries = 5, delayMs = 150) {
+async function removeDirectoryWithRetries(
+  targetPath: string,
+  retries = 5,
+  delayMs = 150,
+): Promise<void> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       await fs.rm(targetPath, { recursive: true, force: true });
       return;
     } catch (error) {
+      const err = error as NodeJS.ErrnoException;
       const isLastAttempt = attempt === retries;
-      const isRetryableWindowsLock =
-        error &&
-        typeof error === 'object' &&
-        ['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error.code);
+      const isRetryableWindowsLock = ['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(err.code || '');
 
       if (!isRetryableWindowsLock || isLastAttempt) {
         throw error;
@@ -355,10 +389,10 @@ async function removeDirectoryWithRetries(targetPath, retries = 5, delayMs = 150
   }
 }
 
-function getDocumentTypeLabel(mimeType) {
+function getDocumentTypeLabel(mimeType?: string): string {
   if (!mimeType) return 'FILE';
 
-  const map = {
+  const map: Record<string, string> = {
     'application/pdf': 'PDF',
     'application/msword': 'DOC',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
@@ -375,7 +409,7 @@ function getDocumentTypeLabel(mimeType) {
   return map[mimeType] || mimeType.split('/')[1]?.toUpperCase() || 'FILE';
 }
 
-async function createPlaceholderThumbnail(label, mimeType) {
+async function createPlaceholderThumbnail(label: string, mimeType?: string): Promise<Buffer> {
   const width = config.processing.thumbnail.width;
   const height = Math.round(width * 1.3);
 
@@ -407,7 +441,6 @@ async function createPlaceholderThumbnail(label, mimeType) {
 }
 
 if (worker) {
-  // Worker event handlers
   worker.on('completed', (job) => {
     console.log(`Job ${job.id} completed successfully`);
   });
@@ -423,21 +456,20 @@ if (worker) {
   console.log(`Worker started with concurrency: ${config.queue.concurrency}`);
   console.log('Waiting for jobs...');
 
-  // Graceful shutdown
   process.on('SIGTERM', async () => {
     console.log('SIGTERM received, closing worker...');
-    await worker.close();
+    await worker?.close();
     process.exit(0);
   });
 
   process.on('SIGINT', async () => {
     console.log('SIGINT received, closing worker...');
-    await worker.close();
+    await worker?.close();
     process.exit(0);
   });
 }
 
-module.exports = {
+export {
   worker,
   processAsset,
   processImageFromFile,

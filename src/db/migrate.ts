@@ -1,12 +1,7 @@
-const { Pool } = require('pg');
-const config = require('../config');
+import { Pool } from 'pg';
+import config from '../config';
 
-// Simple, idempotent migration runner for initial schema.
-// In the future, you can replace this with a full migration tool
-// (e.g. node-pg-migrate, Knex, Prisma) and move this SQL into
-// a proper versioned migration file.
-
-async function runMigrations() {
+async function runMigrations(): Promise<void> {
   const pool = new Pool({
     host: config.database.host,
     port: config.database.port,
@@ -18,7 +13,6 @@ async function runMigrations() {
   try {
     console.log('Running database migrations...');
 
-    // Users table for authentication
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -29,7 +23,6 @@ async function runMigrations() {
       );
     `);
 
-    // Initial assets table + indexes (moved from db.initializeDatabase)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS assets (
         id UUID PRIMARY KEY,
@@ -82,4 +75,4 @@ async function runMigrations() {
   }
 }
 
-runMigrations();
+void runMigrations();

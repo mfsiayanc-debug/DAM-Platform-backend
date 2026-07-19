@@ -1,27 +1,26 @@
-const express = require('express');
-const multer = require('multer');
-const config = require('../config');
-const { authenticate } = require('../middleware/auth');
-const { ALLOWED_MIME_TYPES } = require('../services/uploadPipeline');
-const {
-  uploadAssets,
-  getAssets,
-  getAssetById,
-  downloadAsset,
+import express from 'express';
+import multer, { FileFilterCallback } from 'multer';
+import {
   deleteAsset,
-  updateAssetTags,
+  downloadAsset,
+  getAssetById,
+  getAssets,
   getThumbnail,
-} = require('../controllers/assetController');
+  updateAssetTags,
+  uploadAssets,
+} from '../controllers/assetController';
+import config from '../config';
+import { authenticate } from '../middleware/auth';
+import { ALLOWED_MIME_TYPES } from '../services/uploadPipeline';
 
 const router = express.Router();
 
-// Configure multer for file uploads (store in memory for processing)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: config.upload.maxFileSize,
   },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
     if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
       cb(null, true);
     } else {
@@ -30,7 +29,6 @@ const upload = multer({
   },
 });
 
-// Routes
 router.post('/upload', authenticate, upload.array('files', 10), uploadAssets);
 router.get('/', authenticate, getAssets);
 router.get('/:id', authenticate, getAssetById);
@@ -39,4 +37,4 @@ router.get('/:id/download', authenticate, downloadAsset);
 router.delete('/:id', authenticate, deleteAsset);
 router.patch('/:id/tags', authenticate, updateAssetTags);
 
-module.exports = router;
+export default router;

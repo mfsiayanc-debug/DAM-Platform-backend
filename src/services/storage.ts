@@ -1,8 +1,8 @@
-const Minio = require('minio');
-const config = require('../config');
+import { Client as MinioClient } from 'minio';
+import { Readable } from 'stream';
+import config from '../config';
 
-// Initialize MinIO client
-const minioClient = new Minio.Client({
+const minioClient = new MinioClient({
   endPoint: config.minio.endPoint,
   port: config.minio.port,
   useSSL: config.minio.useSSL,
@@ -10,7 +10,6 @@ const minioClient = new Minio.Client({
   secretKey: config.minio.secretKey,
 });
 
-// Initialize MinIO bucket
 async function initializeMinIO() {
   try {
     const bucketExists = await minioClient.bucketExists(config.minio.bucket);
@@ -19,7 +18,6 @@ async function initializeMinIO() {
       await minioClient.makeBucket(config.minio.bucket, 'us-east-1');
       console.log(`Bucket "${config.minio.bucket}" created successfully`);
 
-      // Set bucket policy to allow public read access for thumbnails
       const policy = {
         Version: '2012-10-17',
         Statement: [
@@ -40,8 +38,12 @@ async function initializeMinIO() {
   }
 }
 
-// Upload file to MinIO
-async function uploadToMinIO(fileName, data, contentType, size) {
+async function uploadToMinIO(
+  fileName: string,
+  data: Buffer | Readable,
+  contentType: string,
+  size?: number,
+) {
   try {
     const uploadSize = Buffer.isBuffer(data) ? data.length : size;
 
@@ -55,8 +57,7 @@ async function uploadToMinIO(fileName, data, contentType, size) {
   }
 }
 
-// Download file from MinIO
-async function downloadFromMinIO(fileName) {
+async function downloadFromMinIO(fileName: string) {
   try {
     return await minioClient.getObject(config.minio.bucket, fileName);
   } catch (error) {
@@ -65,8 +66,7 @@ async function downloadFromMinIO(fileName) {
   }
 }
 
-// Delete file from MinIO
-async function deleteFromMinIO(fileName) {
+async function deleteFromMinIO(fileName: string) {
   try {
     await minioClient.removeObject(config.minio.bucket, fileName);
   } catch (error) {
@@ -75,8 +75,7 @@ async function deleteFromMinIO(fileName) {
   }
 }
 
-// Get presigned URL for file
-async function getPresignedUrl(fileName, expirySeconds = 3600) {
+async function getPresignedUrl(fileName: string, expirySeconds = 3600) {
   try {
     return await minioClient.presignedGetObject(config.minio.bucket, fileName, expirySeconds);
   } catch (error) {
@@ -85,7 +84,7 @@ async function getPresignedUrl(fileName, expirySeconds = 3600) {
   }
 }
 
-module.exports = {
+export {
   minioClient,
   initializeMinIO,
   uploadToMinIO,

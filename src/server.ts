@@ -1,17 +1,16 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const config = require('./config');
-const routes = require('./routes');
-const { initializeMinIO } = require('./services/storage');
-const { resumableUploadPath, tusServer } = require('./services/tusServer');
+import cors from 'cors';
+import express, { NextFunction, Request, Response } from 'express';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import config from './config';
+import routes from './routes';
+import { initializeMinIO } from './services/storage';
+import { resumableUploadPath, tusServer } from './services/tusServer';
 
 const app = express();
 const resumableUploadApp = express();
 resumableUploadApp.all('*', tusServer.handle.bind(tusServer));
 
-// Middleware
 app.use(helmet());
 app.use(
   cors({
@@ -24,38 +23,32 @@ app.use(resumableUploadPath, resumableUploadApp);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Health check
-app.get('/health', (req, res) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-// API Routes
 app.use('/api', routes);
 
-// Error handling middleware
-app.use((err, req, res) => {
+app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.status(err.status || 500).json({
     error: {
       message: err.message || 'Internal Server Error',
-      ...(config.server.env === 'development' && { stack: err.stack }),
+      ...(config.server.env === 'development' ? { stack: err.stack } : {}),
     },
   });
 });
 
-// Initialize services and start server
-async function startServer() {
+async function startServer(): Promise<void> {
   try {
-    // Initialize MinIO
     await initializeMinIO();
-    console.log('✓ MinIO storage initialized');
+    console.log('MinIO storage initialized');
 
-    // Start server
     app.listen(config.server.port, () => {
-      console.log(`✓ Server running on port ${config.server.port}`);
-      console.log(`✓ Environment: ${config.server.env}`);
-      console.log(`✓ API URL: ${config.server.apiUrl}`);
+      console.log(`Server running on port ${config.server.port}`);
+      console.log(`Environment: ${config.server.env}`);
+      console.log(`API URL: ${config.server.apiUrl}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
@@ -63,9 +56,8 @@ async function startServer() {
   }
 }
 
-startServer();
+void startServer();
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully...');
   process.exit(0);

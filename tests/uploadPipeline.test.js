@@ -1,13 +1,18 @@
-jest.mock('../src/services/storage', () => ({
+jest.mock('../dist/services/storage', () => ({
   uploadToMinIO: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../src/services/queue', () => ({
+jest.mock('../dist/services/queue', () => ({
   addJob: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../src/db', () => ({
+jest.mock('../dist/db', () => ({
   query: jest.fn(),
+}));
+
+jest.mock('file-type', () => ({
+  fromBuffer: jest.fn().mockResolvedValue({ mime: 'image/jpeg' }),
+  fromFile: jest.fn().mockResolvedValue({ mime: 'video/mp4' }),
 }));
 
 const mockNodeFs = {
@@ -20,13 +25,13 @@ const mockNodeFs = {
 jest.mock('node:fs', () => mockNodeFs);
 
 const fs = require('node:fs');
-const db = require('../src/db');
-const { addJob } = require('../src/services/queue');
-const { uploadToMinIO } = require('../src/services/storage');
+const db = require('../dist/db');
+const { addJob } = require('../dist/services/queue');
+const { uploadToMinIO } = require('../dist/services/storage');
 const {
   isMimeTypeAllowed,
   createAssetFromUpload,
-} = require('../src/services/uploadPipeline');
+} = require('../dist/services/uploadPipeline');
 
 describe('uploadPipeline', () => {
   beforeEach(() => {
@@ -56,6 +61,7 @@ describe('uploadPipeline', () => {
       mimeType: 'image/jpeg',
       size: 4,
       buffer: Buffer.from('data'),
+      ownerId: 'user-1',
     });
 
     expect(uploadToMinIO).toHaveBeenCalledWith('asset-1.jpg', expect.any(Buffer), 'image/jpeg', 4);
@@ -94,6 +100,7 @@ describe('uploadPipeline', () => {
       originalName: 'clip.mp4',
       mimeType: 'video/mp4',
       sourcePath: '/tmp/clip.mp4',
+      ownerId: 'user-1',
     });
 
     expect(fs.createReadStream).toHaveBeenCalledWith('/tmp/clip.mp4');
@@ -111,6 +118,7 @@ describe('uploadPipeline', () => {
         originalName: 'malware.exe',
         mimeType: 'application/x-msdownload',
         buffer: Buffer.from('data'),
+        ownerId: 'user-1',
       }),
     ).rejects.toThrow('File type application/x-msdownload not supported');
   });

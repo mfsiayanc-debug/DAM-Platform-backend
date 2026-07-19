@@ -1,11 +1,11 @@
 const httpMocks = require('node-mocks-http');
 
-jest.mock('../src/db', () => ({
+jest.mock('../dist/db', () => ({
   query: jest.fn(),
 }));
 
-const db = require('../src/db');
-const { getStats } = require('../src/controllers/statsController');
+const db = require('../dist/db');
+const { getStats } = require('../dist/controllers/statsController');
 
 describe('statsController', () => {
   beforeEach(() => {
@@ -28,7 +28,7 @@ describe('statsController', () => {
         rows: [{ id: 'asset-1', name: 'Hero video', downloads: 9 }],
       });
 
-    const req = httpMocks.createRequest();
+    const req = httpMocks.createRequest({ user: { id: 'user-1', role: 'user' } });
     const res = httpMocks.createResponse();
     const next = jest.fn();
 

@@ -1,4 +1,4 @@
-jest.mock('../src/services/storage', () => ({
+jest.mock('../dist/services/storage', () => ({
   uploadToMinIO: jest.fn().mockResolvedValue(undefined),
   downloadFromMinIO: jest.fn().mockResolvedValue({}),
 }));
@@ -23,21 +23,22 @@ jest.mock('sharp', () => {
   return sharp;
 });
 
-jest.mock('fs', () => {
-  const promises = {
-    mkdtemp: jest.fn().mockResolvedValue('/tmp/dam-test'),
-    rm: jest.fn().mockResolvedValue(undefined),
-    readFile: jest.fn().mockResolvedValue(Buffer.from('file')),
-    stat: jest.fn().mockResolvedValue({ size: 2048 }),
-    unlink: jest.fn().mockResolvedValue(undefined),
-  };
+const mockFsPromises = {
+  mkdtemp: jest.fn().mockResolvedValue('/tmp/dam-test'),
+  rm: jest.fn().mockResolvedValue(undefined),
+  readFile: jest.fn().mockResolvedValue(Buffer.from('file')),
+  stat: jest.fn().mockResolvedValue({ size: 2048 }),
+  unlink: jest.fn().mockResolvedValue(undefined),
+};
 
+jest.mock('fs', () => {
   return {
-    promises,
     createWriteStream: jest.fn(() => ({})),
     createReadStream: jest.fn(() => ({})),
   };
 });
+
+jest.mock('fs/promises', () => mockFsPromises);
 
 jest.mock('os', () => ({
   tmpdir: () => '/tmp',
@@ -47,11 +48,11 @@ jest.mock('stream/promises', () => ({
   pipeline: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../src/db', () => ({
+jest.mock('../dist/db', () => ({
   query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
 }));
 
-jest.mock('../src/services/queue', () => ({
+jest.mock('../dist/services/queue', () => ({
   connection: {},
 }));
 
@@ -80,6 +81,7 @@ jest.mock('fluent-ffmpeg', () => {
     return command;
   });
 
+  ffmpeg.getAvailableFormats = (cb) => cb(null);
   ffmpeg.ffprobe = (inputPath, cb) => {
     cb(null, {
       format: { duration: 10, bit_rate: 1000 },
@@ -95,18 +97,21 @@ jest.mock('fluent-ffmpeg', () => {
     });
   };
 
-  return ffmpeg;
+  return {
+    __esModule: true,
+    default: ffmpeg,
+  };
 });
 
 describe('worker processing logic', () => {
-  const storage = require('../src/services/storage');
-  const db = require('../src/db');
+  const storage = require('../dist/services/storage');
+  const db = require('../dist/db');
   const {
     processImageFromFile,
     processDocumentFromFile,
     processVideoFromFile,
     processAsset,
-  } = require('../src/worker');
+  } = require('../dist/worker');
 
   beforeEach(() => {
     jest.clearAllMocks();

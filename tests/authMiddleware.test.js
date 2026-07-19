@@ -5,7 +5,7 @@ jest.mock('jsonwebtoken', () => ({
 }));
 
 const jwt = require('jsonwebtoken');
-const { authenticate, getUserFromRequest } = require('../src/middleware/auth');
+const { authenticate, getUserFromRequest } = require('../dist/middleware/auth');
 
 describe('auth middleware', () => {
   beforeEach(() => {

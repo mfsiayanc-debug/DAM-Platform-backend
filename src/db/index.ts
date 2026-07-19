@@ -1,7 +1,6 @@
-const { Pool } = require('pg');
-const config = require('../config');
+import { Pool, QueryResult, QueryResultRow } from 'pg';
+import config from '../config';
 
-// Create PostgreSQL connection pool
 const pool = new Pool({
   host: config.database.host,
   port: config.database.port,
@@ -13,11 +12,13 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000,
 });
 
-// Query helper
-async function query(text, params) {
+async function query<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params?: unknown[],
+): Promise<QueryResult<T>> {
   const start = Date.now();
   try {
-    const res = await pool.query(text, params);
+    const res = await pool.query<T>(text, params);
     const duration = Date.now() - start;
     console.log('Executed query', { text, duration, rows: res.rowCount });
     return res;
@@ -27,12 +28,13 @@ async function query(text, params) {
   }
 }
 
-// Get pool for transactions
-function getPool() {
+function getPool(): Pool {
   return pool;
 }
 
-module.exports = {
+const db = {
   query,
   getPool,
 };
+
+export default db;

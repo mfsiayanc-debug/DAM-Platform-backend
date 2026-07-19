@@ -1,10 +1,20 @@
-const fs = require('node:fs');
-const path = require('node:path');
-const { v4: uuidv4 } = require('uuid');
-const FileType = require('file-type');
-const { uploadToMinIO } = require('./storage');
-const { addJob } = require('./queue');
-const db = require('../db');
+import fs from 'node:fs';
+import path from 'node:path';
+import * as FileType from 'file-type';
+import { v4 as uuidv4 } from 'uuid';
+import db from '../db';
+import { addJob } from './queue';
+import { uploadToMinIO } from './storage';
+
+type CreateAssetFromUploadInput = {
+  assetId?: string;
+  originalName: string;
+  mimeType: string;
+  size?: number;
+  buffer?: Buffer;
+  sourcePath?: string;
+  ownerId: string;
+};
 
 const ALLOWED_MIME_TYPES = [
   'image/jpeg',
@@ -19,17 +29,17 @@ const ALLOWED_MIME_TYPES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ];
 
-function isMimeTypeAllowed(mimeType) {
+function isMimeTypeAllowed(mimeType: string): boolean {
   return ALLOWED_MIME_TYPES.includes(mimeType);
 }
 
-function determineAssetType(mimeType) {
+function determineAssetType(mimeType: string): 'image' | 'video' | 'document' {
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType.startsWith('video/')) return 'video';
   return 'document';
 }
 
-function generateTags(filename, mimeType) {
+function generateTags(filename: string, mimeType: string): string[] {
   const tags = [];
 
   if (mimeType.startsWith('image/')) tags.push('image');
@@ -47,12 +57,12 @@ function generateTags(filename, mimeType) {
   return [...new Set(tags)];
 }
 
-function createStoredFileName(assetId, originalName) {
+function createStoredFileName(assetId: string, originalName: string): string {
   const extension = path.extname(originalName || '');
   return extension ? `${assetId}${extension.toLowerCase()}` : assetId;
 }
 
-function shouldStrictlyValidateMimeType(mimeType) {
+function shouldStrictlyValidateMimeType(mimeType?: string): boolean {
   return (
     mimeType?.startsWith('image/') ||
     mimeType?.startsWith('video/') ||
@@ -60,7 +70,13 @@ function shouldStrictlyValidateMimeType(mimeType) {
   );
 }
 
-async function detectFileType({ buffer, sourcePath }) {
+async function detectFileType({
+  buffer,
+  sourcePath,
+}: {
+  buffer?: Buffer;
+  sourcePath?: string;
+}) {
   if (buffer) {
     return FileType.fromBuffer(buffer);
   }
@@ -72,7 +88,17 @@ async function detectFileType({ buffer, sourcePath }) {
   return undefined;
 }
 
-async function validateUploadContent({ originalName, mimeType, buffer, sourcePath }) {
+async function validateUploadContent({
+  originalName,
+  mimeType,
+  buffer,
+  sourcePath,
+}: {
+  originalName: string;
+  mimeType: string;
+  buffer?: Buffer;
+  sourcePath?: string;
+}) {
   if (!shouldStrictlyValidateMimeType(mimeType)) {
     return;
   }
@@ -100,7 +126,7 @@ async function createAssetFromUpload({
   buffer,
   sourcePath,
   ownerId,
-}) {
+}: CreateAssetFromUploadInput) {
   if (!originalName) {
     throw new Error('Original file name is required');
   }
@@ -129,8 +155,8 @@ async function createAssetFromUpload({
   const assetType = determineAssetType(mimeType);
   const tags = generateTags(originalName, mimeType);
 
-  const uploadSize = size ?? buffer?.length ?? (await fs.promises.stat(sourcePath)).size;
-  const uploadSource = sourcePath ? fs.createReadStream(sourcePath) : buffer;
+  const uploadSize = size ?? buffer?.length ?? (await fs.promises.stat(sourcePath!)).size;
+  const uploadSource = sourcePath ? fs.createReadStream(sourcePath) : buffer!;
 
   await uploadToMinIO(fileName, uploadSource, mimeType, uploadSize);
 
@@ -161,7 +187,7 @@ async function createAssetFromUpload({
     mimeType,
   });
 
-  const asset = result.rows[0];
+  const asset = result.rows[0] as { id: string; name: string; type: string; status: string };
 
   return {
     id: asset.id,
@@ -171,8 +197,4 @@ async function createAssetFromUpload({
   };
 }
 
-module.exports = {
-  ALLOWED_MIME_TYPES,
-  isMimeTypeAllowed,
-  createAssetFromUpload,
-};
+export { ALLOWED_MIME_TYPES, isMimeTypeAllowed, createAssetFromUpload };

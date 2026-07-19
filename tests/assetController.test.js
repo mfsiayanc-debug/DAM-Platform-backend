@@ -1,22 +1,28 @@
 const httpMocks = require('node-mocks-http');
 
-jest.mock('../src/services/storage', () => ({
+jest.mock('file-type', () => ({
+  fromBuffer: jest.fn().mockResolvedValue({ mime: 'image/jpeg' }),
+  fromFile: jest.fn().mockResolvedValue({ mime: 'image/jpeg' }),
+}));
+
+jest.mock('../dist/services/storage', () => ({
   uploadToMinIO: jest.fn().mockResolvedValue(undefined),
   downloadFromMinIO: jest.fn().mockResolvedValue({ pipe: jest.fn() }),
   deleteFromMinIO: jest.fn().mockResolvedValue(undefined),
+  getPresignedUrl: jest.fn().mockResolvedValue('https://example.com/presigned'),
 }));
 
-jest.mock('../src/services/queue', () => ({
+jest.mock('../dist/services/queue', () => ({
   addJob: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('../src/db', () => ({
+jest.mock('../dist/db', () => ({
   query: jest.fn(),
 }));
 
-const storage = require('../src/services/storage');
-const { addJob } = require('../src/services/queue');
-const db = require('../src/db');
+const storage = require('../dist/services/storage');
+const { addJob } = require('../dist/services/queue');
+const db = require('../dist/db');
 const {
   uploadAssets,
   getAssets,
@@ -25,7 +31,7 @@ const {
   deleteAsset,
   updateAssetTags,
   getThumbnail,
-} = require('../src/controllers/assetController');
+} = require('../dist/controllers/assetController');
 
 describe('assetController', () => {
   beforeEach(() => {
@@ -65,7 +71,10 @@ describe('assetController', () => {
       mimetype: 'image/jpeg',
       size: 4,
     };
-    const req = httpMocks.createRequest({ files: [file] });
+    const req = httpMocks.createRequest({
+      files: [file],
+      user: { id: 'user-1', role: 'user' },
+    });
     const res = httpMocks.createResponse();
     const next = jest.fn();
 
@@ -108,7 +117,7 @@ describe('assetController', () => {
         rows: [{ count: '1' }],
       });
 
-    const req = httpMocks.createRequest({ query: {} });
+    const req = httpMocks.createRequest({ query: {}, user: { id: 'user-1', role: 'user' } });
     const res = httpMocks.createResponse();
     const next = jest.fn();
 
@@ -126,7 +135,10 @@ describe('assetController', () => {
   test('getAssetById returns 404 when not found', async () => {
     db.query.mockResolvedValueOnce({ rows: [] });
 
-    const req = httpMocks.createRequest({ params: { id: 'missing' } });
+    const req = httpMocks.createRequest({
+      params: { id: 'missing' },
+      user: { id: 'user-1', role: 'user' },
+    });
     const res = httpMocks.createResponse();
     const next = jest.fn();
 
@@ -147,7 +159,7 @@ describe('assetController', () => {
       ],
     });
 
-    const req = httpMocks.createRequest({ params: { id: '1' } });
+    const req = httpMocks.createRequest({ params: { id: '1' }, user: { id: 'user-1', role: 'user' } });
     const res = httpMocks.createResponse();
     res.setHeader = jest.fn();
 
@@ -170,13 +182,16 @@ describe('assetController', () => {
       })
       .mockResolvedValueOnce({ rows: [] });
 
-    const req = httpMocks.createRequest({ params: { id: '1' } });
+    const req = httpMocks.createRequest({ params: { id: '1' }, user: { id: 'user-1', role: 'user' } });
     const res = httpMocks.createResponse();
 
     await deleteAsset(req, res, jest.fn());
 
     expect(storage.deleteFromMinIO).toHaveBeenCalledWith('1.jpg');
-    expect(db.query).toHaveBeenCalledWith('DELETE FROM assets WHERE id = $1', ['1']);
+    expect(db.query).toHaveBeenCalledWith('DELETE FROM assets WHERE id = $1 AND user_id = $2', [
+      '1',
+      'user-1',
+    ]);
     expect(res.statusCode).toBe(200);
   });
 
@@ -203,6 +218,7 @@ describe('assetController', () => {
     const req = httpMocks.createRequest({
       params: { id: '1' },
       body: { tags: ['tag'] },
+      user: { id: 'user-1', role: 'user' },
     });
     const res = httpMocks.createResponse();
 
@@ -223,7 +239,7 @@ describe('assetController', () => {
       ],
     });
 
-    const req = httpMocks.createRequest({ params: { id: '1' } });
+    const req = httpMocks.createRequest({ params: { id: '1' }, user: { id: 'user-1', role: 'user' } });
     const res = httpMocks.createResponse();
 
     await getThumbnail(req, res, jest.fn());
